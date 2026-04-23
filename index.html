@@ -465,16 +465,41 @@ function patchCell(sheet,colIdx,rowIdx,value){
   }
 }
 
+// ---- Value classification helpers ----
+// A real MID looks like: 2-letter country + alphanumeric body, typically 8-20 chars, NO spaces, all caps pattern
+function looksLikeMID(val){
+  if(!val)return false;
+  const v=val.trim();
+  // Must be alphanumeric only (no spaces), 6-25 chars, starts with 2 alpha chars
+  return /^[A-Z]{2}[A-Z0-9]{4,23}$/.test(v.toUpperCase())&&!/\s/.test(v)&&v.length>=6&&v.length<=25;
+}
+function looksLikeName(val){
+  if(!val)return false;
+  const v=val.trim();
+  // Has spaces, or is mixed case, or has special chars common in company names
+  // Definitely NOT a MID pattern
+  return v.length>0&&!looksLikeMID(v);
+}
+
+// Look up a value in the DB — try as MID, try as Name (exact then case-insensitive)
+function dbLookupByMID(mid){
+  const mL=mid.toLowerCase();
+  const entry=Object.entries(db).find(([n,v])=>v.mid.toLowerCase()===mL);
+  return entry?{name:entry[0],mid:entry[1].mid,source:entry[1].source}:null;
+}
+function dbLookupByName(name){
+  if(db[name])return{name,mid:db[name].mid,source:db[name].source};
+  const ciKey=Object.keys(db).find(k=>k.toLowerCase()===name.toLowerCase());
+  return ciKey?{name:ciKey,mid:db[ciKey].mid,source:db[ciKey].source}:null;
+}
+
 function handleAutofill(file){
   const reader=new FileReader();
   reader.onload=e=>{
     try{
-      // Read with cellStyles:true so ALL formatting is preserved in the workbook object
       const wb=XLSX.read(e.target.result,{type:'array',cellStyles:true,cellNF:true,cellDates:true});
       const sheetName=wb.SheetNames[0];
       const sheet=wb.Sheets[sheetName];
-
-      // Read data as array-of-arrays just to find headers and scan values
       const rows=XLSX.utils.sheet_to_json(sheet,{defval:'',header:1});
       if(!rows.length){alert('Empty file.');return;}
 
@@ -487,73 +512,170 @@ function handleAutofill(file){
         return;
       }
 
-      let filled=0,unfilled=0,conflictRows=0,unchanged=0,details=[];
-
-      // i=0 is header row (row 1 in Excel), data starts at i=1 (row 2)
-      for(let i=1;i<rows.length;i++){
-        const row=rows[i];
-        const excelRow=i+1; // 1-based Excel row number
-        if(!row||row.every(c=>c===''||c===null||c===undefined))continue;
-
-        const rawMID=midCol>=0?String(row[midCol]||'').trim():'';
-        const rawName=nameCol>=0?String(row[nameCol]||'').trim():'';
-        const hasMID=rawMID!==''&&rawMID!=='nan'&&rawMID!=='undefined';
-        const hasName=rawName!==''&&rawName!=='nan'&&rawName!=='undefined';
-
-        if(hasMID&&hasName){unchanged++;continue;}
-
-        if(!hasMID&&hasName){
-          const isConflict=!!conflicts[rawName];
-          if(isConflict){
-            conflictRows++;
-            details.push({row:excelRow,type:'conflict',name:rawName,mid:'',action:'NOT filled',reason:`MID conflict: ${Object.keys(conflicts[rawName]).join(' vs ')} — verify manually`});
-            continue;
-          }
-          const dbEntry=db[rawName];
-          if(dbEntry){
-            patchCell(sheet,midCol,excelRow,dbEntry.mid);
-            filled++;
-            details.push({row:excelRow,type:'filled',name:rawName,mid:dbEntry.mid,action:`Filled MID from ${dbEntry.source}`,reason:'Exact name match'});
-          }else{
-            const ciKey=Object.keys(db).find(k=>k.toLowerCase()===rawName.toLowerCase());
-            if(ciKey){
-              patchCell(sheet,midCol,excelRow,db[ciKey].mid);
-              filled++;
-              details.push({row:excelRow,type:'filled',name:rawName,mid:db[ciKey].mid,action:`Filled MID (case-insensitive: "${ciKey}")`,reason:'Case-insensitive name match'});
-            }else{
-              unfilled++;
-              details.push({row:excelRow,type:'unfilled',name:rawName,mid:'',action:'NOT filled',reason:'Name not found in database'});
-            }
-          }
-        }
-
-        if(hasMID&&!hasName){
-          const dbEntry=Object.entries(db).find(([n,v])=>v.mid.toLowerCase()===rawMID.toLowerCase());
-          if(dbEntry){
-            patchCell(sheet,nameCol,excelRow,dbEntry[0]);
-            filled++;
-            details.push({row:excelRow,type:'filled',name:dbEntry[0],mid:rawMID,action:`Filled Name from ${dbEntry[1].source}`,reason:'Exact MID match'});
-          }else{
-            unfilled++;
-            details.push({row:excelRow,type:'unfilled',name:'',mid:rawMID,action:'NOT filled',reason:'MID not found in database'});
-          }
-        }
-
-        if(!hasMID&&!hasName){
-          unfilled++;
-          details.push({row:excelRow,type:'unfilled',name:'',mid:'',action:'NOT filled',reason:'Both MID and Name blank — need at least one to resolve'});
+      // Skip the first 3 rows (header + 2 instruction rows that manifests often have)
+      // Detect how many non-data header rows there are by checking if row looks like instructions
+      // Row 1 = column headers (index 0), rows 2-4 may be "Mandatory / Min:1..." instruction rows
+      let dataStartIdx=1;
+      for(let i=1;i<=4&&i<rows.length;i++){
+        const r=rows[i];
+        const midVal=midCol>=0?String(r[midCol]||'').trim():'';
+        const nameVal=nameCol>=0?String(r[nameCol]||'').trim():'';
+        // If either cell contains typical instruction text, skip this row
+        if(/mandatory|conditional|min:|max:|alphanumeric|if mid/i.test(midVal+' '+nameVal)){
+          dataStartIdx=i+1;
         }
       }
 
-      // Write the ORIGINAL workbook back — only the cells we patched above are changed
-      // Everything else (colours, fonts, column widths, merged cells) is untouched
-      showAutofillSummary(file.name,filled,unfilled,conflictRows,unchanged,details,wb,sheetName);
-    }catch(err){alert('Error reading file: '+err.message);}
+      let filled=0,swapped=0,unfilled=0,conflictRows=0,unchanged=0,details=[];
+
+      for(let i=dataStartIdx;i<rows.length;i++){
+        const row=rows[i];
+        const excelRow=i+1;
+        if(!row||row.every(c=>c===''||c===null||c===undefined))continue;
+
+        const rawMIDcell=midCol>=0?String(row[midCol]||'').trim():'';
+        const rawNameCell=nameCol>=0?String(row[nameCol]||'').trim():'';
+        const midEmpty=rawMIDcell===''||rawMIDcell==='nan'||rawMIDcell==='undefined';
+        const nameEmpty=rawNameCell===''||rawNameCell==='nan'||rawNameCell==='undefined';
+
+        // ── CASE 1: Both correctly present — validate they make sense ──
+        if(!midEmpty&&!nameEmpty){
+          // Check if they look correctly placed
+          const midOK=looksLikeMID(rawMIDcell);
+          const nameOK=looksLikeName(rawNameCell);
+          if(midOK&&nameOK){unchanged++;continue;}
+
+          // Both present but SWAPPED: MID cell has a name, Name cell has a MID
+          const midCellLooksLikeName=looksLikeName(rawMIDcell)&&!looksLikeMID(rawMIDcell);
+          const nameCellLooksLikeMID=looksLikeMID(rawNameCell)&&!looksLikeName(rawNameCell);
+          if(midCellLooksLikeName&&nameCellLooksLikeMID){
+            // Swap them
+            patchCell(sheet,midCol,excelRow,rawNameCell);
+            patchCell(sheet,nameCol,excelRow,rawMIDcell);
+            swapped++;
+            details.push({row:excelRow,type:'swapped',
+              name:rawMIDcell,mid:rawNameCell,
+              action:`Swapped: MID←"${rawNameCell}", Name←"${rawMIDcell}"`,
+              reason:'Values were in wrong columns — detected and corrected'});
+            continue;
+          }
+
+          // MID cell has a name, Name cell also has a name → MID col has name, need to find MID
+          if(midCellLooksLikeName&&nameOK){
+            // rawMIDcell is actually the name, rawNameCell is correct name
+            // Use rawMIDcell as name to look up MID
+            const isConflict=!!conflicts[rawMIDcell];
+            if(isConflict){conflictRows++;details.push({row:excelRow,type:'conflict',name:rawMIDcell,mid:'',action:'NOT fixed',reason:`MID cell contains a name ("${rawMIDcell}") but has a MID conflict — verify manually`});continue;}
+            const found=dbLookupByName(rawMIDcell);
+            if(found){
+              patchCell(sheet,midCol,excelRow,found.mid);
+              swapped++;
+              details.push({row:excelRow,type:'swapped',name:rawMIDcell,mid:found.mid,action:`MID col had name "${rawMIDcell}" → replaced with MID ${found.mid}`,reason:'MID column contained manufacturer name; looked up correct MID'});
+            }else{
+              unfilled++;
+              details.push({row:excelRow,type:'unfilled',name:rawMIDcell,mid:'',action:'NOT fixed',reason:`MID column contains name "${rawMIDcell}" but no matching MID found in database`});
+            }
+            continue;
+          }
+
+          // Name cell has a MID, MID cell is correct MID → Name col has MID, need name
+          if(nameCellLooksLikeMID&&midOK){
+            const found=dbLookupByMID(rawNameCell);
+            if(found){
+              patchCell(sheet,nameCol,excelRow,found.name);
+              swapped++;
+              details.push({row:excelRow,type:'swapped',name:found.name,mid:rawMIDcell,action:`Name col had MID "${rawNameCell}" → replaced with name "${found.name}"`,reason:'Name column contained MID; looked up correct manufacturer name'});
+            }else{
+              unfilled++;
+              details.push({row:excelRow,type:'unfilled',name:'',mid:rawMIDcell,action:'NOT fixed',reason:`Name column contains MID "${rawNameCell}" but no matching name found in database`});
+            }
+            continue;
+          }
+
+          unchanged++;
+          continue;
+        }
+
+        // ── CASE 2: MID blank, Name cell has something ──
+        if(midEmpty&&!nameEmpty){
+          // Check: is what's in the Name cell actually a MID (swap case)?
+          if(looksLikeMID(rawNameCell)){
+            const found=dbLookupByMID(rawNameCell);
+            if(found){
+              patchCell(sheet,midCol,excelRow,rawNameCell);   // move MID to correct col
+              patchCell(sheet,nameCol,excelRow,found.name);   // fill name
+              swapped++;
+              details.push({row:excelRow,type:'swapped',name:found.name,mid:rawNameCell,action:`Name col had MID "${rawNameCell}" → moved to MID col, Name filled as "${found.name}"`,reason:'MID was in Name column; corrected and filled name'});
+            }else{
+              // MID in wrong col but not in DB — at least move it
+              patchCell(sheet,midCol,excelRow,rawNameCell);
+              patchCell(sheet,nameCol,excelRow,'');
+              swapped++;
+              details.push({row:excelRow,type:'swapped',name:'',mid:rawNameCell,action:`Name col had MID "${rawNameCell}" → moved to MID col. Name not found in database`,reason:'MID was in Name column — moved to correct column. Could not fill name (not in database)'});
+            }
+            continue;
+          }
+          // Normal: Name present, MID blank — look up MID from name
+          const isConflict=!!conflicts[rawNameCell];
+          if(isConflict){conflictRows++;details.push({row:excelRow,type:'conflict',name:rawNameCell,mid:'',action:'NOT filled',reason:`MID conflict: ${Object.keys(conflicts[rawNameCell]).join(' vs ')} — verify manually`});continue;}
+          const found=dbLookupByName(rawNameCell);
+          if(found){
+            patchCell(sheet,midCol,excelRow,found.mid);
+            filled++;
+            details.push({row:excelRow,type:'filled',name:rawNameCell,mid:found.mid,action:`Filled MID from ${found.source}`,reason:'Exact name match'});
+          }else{
+            unfilled++;
+            details.push({row:excelRow,type:'unfilled',name:rawNameCell,mid:'',action:'NOT filled',reason:'Name not found in database — upload more manifests or enter manually'});
+          }
+          continue;
+        }
+
+        // ── CASE 3: Name blank, MID cell has something ──
+        if(!midEmpty&&nameEmpty){
+          // Check: is what's in the MID cell actually a Name (swap case)?
+          if(looksLikeName(rawMIDcell)&&!looksLikeMID(rawMIDcell)){
+            const isConflict=!!conflicts[rawMIDcell];
+            if(isConflict){conflictRows++;details.push({row:excelRow,type:'conflict',name:rawMIDcell,mid:'',action:'NOT fixed',reason:`MID column contains name "${rawMIDcell}" with a conflict — verify manually`});continue;}
+            const found=dbLookupByName(rawMIDcell);
+            if(found){
+              patchCell(sheet,nameCol,excelRow,rawMIDcell);  // move name to correct col
+              patchCell(sheet,midCol,excelRow,found.mid);    // fill correct MID
+              swapped++;
+              details.push({row:excelRow,type:'swapped',name:rawMIDcell,mid:found.mid,action:`MID col had name "${rawMIDcell}" → moved to Name col, MID filled as "${found.mid}"`,reason:'Name was in MID column; corrected and filled MID'});
+            }else{
+              // Name in wrong col, not in DB — move it anyway, leave MID blank
+              patchCell(sheet,nameCol,excelRow,rawMIDcell);
+              patchCell(sheet,midCol,excelRow,'');
+              swapped++;
+              details.push({row:excelRow,type:'swapped',name:rawMIDcell,mid:'',action:`MID col had name "${rawMIDcell}" → moved to Name col. MID not found in database`,reason:'Name was in MID column — moved to correct column. Could not fill MID (not in database)'});
+            }
+            continue;
+          }
+          // Normal: MID present, Name blank — look up name from MID
+          const found=dbLookupByMID(rawMIDcell);
+          if(found){
+            patchCell(sheet,nameCol,excelRow,found.name);
+            filled++;
+            details.push({row:excelRow,type:'filled',name:found.name,mid:rawMIDcell,action:`Filled Name from ${found.source}`,reason:'Exact MID match'});
+          }else{
+            unfilled++;
+            details.push({row:excelRow,type:'unfilled',name:'',mid:rawMIDcell,action:'NOT filled',reason:'MID not found in database'});
+          }
+          continue;
+        }
+
+        // ── CASE 4: Both blank ──
+        unfilled++;
+        details.push({row:excelRow,type:'unfilled',name:'',mid:'',action:'NOT filled',reason:'Both MID and Name blank — cannot resolve without at least one identifier'});
+      }
+
+      showAutofillSummary(file.name,filled,swapped,unfilled,conflictRows,unchanged,details,wb,sheetName);
+    }catch(err){alert('Error reading file: '+err.message+'\n'+err.stack);}
   };
   reader.readAsArrayBuffer(file);
 }
 
-function showAutofillSummary(fileName,filled,unfilled,conflictRows,unchanged,details,wb,sheetName){
+function showAutofillSummary(fileName,filled,swapped,unfilled,conflictRows,unchanged,details,wb,sheetName){
   const s=document.getElementById('autofillSummary');
   s.style.display='block';
 
@@ -565,30 +687,42 @@ function showAutofillSummary(fileName,filled,unfilled,conflictRows,unchanged,det
 
   const problemRows=details.filter(d=>d.type==='unfilled'||d.type==='conflict');
   const filledRows=details.filter(d=>d.type==='filled');
+  const swappedRows=details.filter(d=>d.type==='swapped');
 
   s.innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
       <div>
         <div style="font-size:16px;font-weight:700">&#128203; ${fileName}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:3px">Auto-fill complete &mdash; review results below before downloading</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">Processing complete &mdash; review all changes below before downloading</div>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <a href="${url}" download="${outName}" class="btn btn-green">&#8595; Download Filled Manifest</a>
+        <a href="${url}" download="${outName}" class="btn btn-green">&#8595; Download Fixed Manifest</a>
         ${problemRows.length?`<button class="btn" onclick="document.getElementById('problems-section').scrollIntoView({behavior:'smooth'})">&#9888; ${problemRows.length} rows need attention</button>`:''}
       </div>
     </div>
     <div class="summary-grid">
-      <div class="sum-card filled"><div class="sum-n filled">${filled}</div><div class="sum-l">Cells auto-filled</div></div>
-      <div class="sum-card unchanged"><div class="sum-n unchanged">${unchanged}</div><div class="sum-l">Rows already complete</div></div>
-      <div class="sum-card conflict-c"><div class="sum-n conflict-c">${conflictRows}</div><div class="sum-l">Conflict &mdash; not filled</div></div>
+      <div class="sum-card filled"><div class="sum-n filled">${filled}</div><div class="sum-l">Blank cells filled</div></div>
+      <div class="sum-card conflict-c" style="background:#6366f115;border-color:#6366f140"><div class="sum-n" style="color:#6366f1">${swapped}</div><div class="sum-l">Swapped / corrected</div></div>
+      <div class="sum-card unchanged"><div class="sum-n unchanged">${unchanged}</div><div class="sum-l">Already correct</div></div>
+      <div class="sum-card conflict-c"><div class="sum-n conflict-c">${conflictRows}</div><div class="sum-l">Conflicts &mdash; not touched</div></div>
       <div class="sum-card unfilled"><div class="sum-n unfilled">${unfilled}</div><div class="sum-l">Could not resolve</div></div>
     </div>
+    ${swappedRows.length?`
+    <div style="margin-bottom:16px">
+      <div class="chart-title" style="margin-bottom:10px;color:#6366f1">&#8646; Swapped / corrected values (${swappedRows.length} rows)</div>
+      <div style="max-height:240px;overflow-y:auto;border:1px solid #6366f130;border-radius:8px">
+        <table class="autofill-rows-table">
+          <thead><tr><th>Row</th><th>Manufacturer Name</th><th>MID</th><th>What was done</th></tr></thead>
+          <tbody>${swappedRows.map(d=>`<tr style="background:#6366f108"><td>${d.row}</td><td>${d.name||'<span style="color:var(--muted)">—</span>'}</td><td class="mid-cell">${d.mid||'<span style="color:var(--muted)">—</span>'}</td><td style="font-size:11px;color:var(--muted)">${d.action}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`:''}
     ${filledRows.length?`
     <div style="margin-bottom:16px">
-      <div class="chart-title" style="margin-bottom:10px">&#10003; Successfully filled (${filledRows.length} rows)</div>
-      <div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+      <div class="chart-title" style="margin-bottom:10px">&#10003; Blank cells filled (${filledRows.length} rows)</div>
+      <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
         <table class="autofill-rows-table">
-          <thead><tr><th>Row</th><th>Manufacturer Name</th><th>MID Filled</th><th>Source</th></tr></thead>
+          <thead><tr><th>Row</th><th>Manufacturer Name</th><th>MID</th><th>Source</th></tr></thead>
           <tbody>${filledRows.map(d=>`<tr class="row-filled"><td>${d.row}</td><td>${d.name}</td><td class="mid-cell">${d.mid}</td><td style="font-size:11px;color:var(--muted)">${d.action}</td></tr>`).join('')}</tbody>
         </table>
       </div>
