@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MID Master Tool v2</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a0f;color:#e2e8f0;min-height:100vh}
+:root{--bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c26;--border:#2a2a3a;--accent:#6366f1;--accent2:#10b981;--accent3:#f59e0b;--accent4:#ef4444;--text:#e2e8f0;--muted:#64748b;--muted2:#475569}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200}
+.brand{display:flex;align-items:center;gap:12px}
+.brand-icon{width:38px;height:38px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff}
+.brand-name{font-size:16px;font-weight:700;background:linear-gradient(90deg,#6366f1,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.brand-sub{font-size:11px;color:var(--muted);margin-top:1px}
+.topbar-stats{display:flex;gap:20px}
+.tstat{text-align:center}
+.tstat-n{font-size:20px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+.tstat-l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.tabs{display:flex;gap:2px;background:var(--surface);padding:0 28px;border-bottom:1px solid var(--border);overflow-x:auto}
+.tab{padding:12px 18px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:.15s;white-space:nowrap;flex-shrink:0}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.page{display:none;padding:28px;max-width:1100px;margin:0 auto}
+.page.active{display:block}
+.search-hero{text-align:center;padding:20px 0 28px}
+.search-hero h2{font-size:24px;font-weight:700;margin-bottom:6px}
+.search-hero p{color:var(--muted);font-size:14px}
+.search-bar{display:flex;max-width:640px;margin:20px auto 0}
+.search-bar input{flex:1;background:var(--surface);border:1.5px solid var(--border);border-right:none;color:var(--text);font-size:15px;padding:13px 18px;outline:none;border-radius:10px 0 0 10px;transition:.2s}
+.search-bar input:focus{border-color:var(--accent)}
+.search-bar input::placeholder{color:var(--muted)}
+.search-bar select{background:var(--surface2);border:1.5px solid var(--border);border-left:none;border-right:none;color:var(--muted);font-size:13px;padding:0 12px;outline:none;cursor:pointer}
+.search-bar button{background:var(--accent);border:none;color:#fff;font-weight:600;font-size:14px;padding:13px 24px;cursor:pointer;border-radius:0 10px 10px 0;transition:.15s}
+.search-bar button:hover{background:#4f46e5}
+.result-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:20px}
+.result-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;transition:.15s}
+.result-card:hover{border-color:#3a3a5a}
+.result-card.exact{border-color:#6366f150;background:#6366f108}
+.rc-type{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px}
+.rc-type.exact{color:var(--accent2)}
+.rc-type.partial{color:var(--accent3)}
+.rc-name{font-size:13px;color:var(--muted);margin-bottom:6px;line-height:1.4}
+.rc-value{font-family:'Courier New',monospace;font-size:18px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rc-meta{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px}
+.rc-tag{font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;color:var(--muted)}
+.copy-btn{font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:4px 10px;color:var(--muted);cursor:pointer;transition:.15s;font-family:inherit}
+.copy-btn:hover{color:var(--accent2);border-color:var(--accent2)}
+.copy-btn.ok{color:var(--accent2);border-color:var(--accent2)}
+mark{background:#6366f122;color:var(--accent);border-radius:3px;padding:0 2px}
+.empty-state{text-align:center;padding:50px 20px;color:var(--muted)}
+.empty-state .big{font-size:36px;margin-bottom:12px}
+.empty-state h3{font-size:16px;color:var(--text);margin-bottom:6px}
+.alerts-bar{background:#1a1208;border:1px solid #f59e0b44;border-radius:10px;padding:14px 20px;margin-bottom:24px;display:none}
+.alerts-bar.show{display:block}
+.alerts-title{font-size:12px;font-weight:700;color:var(--accent3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+.alert-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f59e0b22;gap:12px;flex-wrap:wrap}
+.alert-row:last-child{border:none}
+.alert-name{font-size:13px;font-weight:600}
+.alert-suggest{font-size:12px;color:var(--accent);font-family:'Courier New',monospace;display:flex;align-items:center;gap:8px}
+.alert-none{font-size:12px;color:var(--accent4)}
+.upload-zone{border:2px dashed var(--border);border-radius:14px;padding:40px 28px;text-align:center;cursor:pointer;transition:.2s;background:var(--surface)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:#6366f108}
+.upload-zone h3{font-size:16px;font-weight:600;margin:14px 0 6px}
+.upload-zone p{font-size:13px;color:var(--muted)}
+.upload-icon{font-size:42px}
+.upload-log{margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:10px;max-height:250px;overflow-y:auto}
+.log-row{padding:10px 16px;font-size:13px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px;font-family:'Courier New',monospace;line-height:1.5}
+.log-row:last-child{border:none}
+.log-ok{color:var(--accent2)}
+.log-warn{color:var(--accent3)}
+.log-err{color:var(--accent4)}
+.analytics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin-bottom:28px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px}
+.stat-n{font-size:28px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+.stat-l{font-size:12px;color:var(--muted);margin-top:4px}
+.chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px}
+.chart-title{font-size:14px;font-weight:600;margin-bottom:16px;color:var(--text)}
+.bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.bar-label{font-size:12px;color:var(--muted);width:200px;text-align:right;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{flex:1;background:var(--surface2);border-radius:4px;height:22px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;background:var(--accent);transition:.5s;display:flex;align-items:center;padding-left:8px;min-width:32px}
+.bar-val{font-size:11px;font-family:'Courier New',monospace;color:#fff;font-weight:600}
+.table-controls{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.table-controls input{flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:13px;padding:9px 14px;border-radius:8px;outline:none}
+.table-controls input:focus{border-color:var(--accent)}
+.table-controls input::placeholder{color:var(--muted)}
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:500px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{padding:11px 16px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);cursor:pointer;user-select:none}
+thead th:hover{color:var(--text)}
+tbody tr{border-bottom:1px solid #1c1c26;transition:.1s;cursor:pointer}
+tbody tr:hover{background:#1a1a26}
+tbody td{padding:10px 16px;vertical-align:middle}
+td.mid-cell{font-family:'Courier New',monospace;color:var(--accent2);font-size:12px}
+td.src-cell{font-size:11px;color:var(--muted)}
+td.time-cell{font-size:11px;color:var(--muted2)}
+.row-count{font-size:12px;color:var(--muted);margin-left:auto}
+.btn{padding:9px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text);transition:.15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-green{background:#10b98115;color:var(--accent2);border-color:#10b98140}
+.btn-green:hover{background:#10b98125;border-color:var(--accent2)}
+.btn-danger:hover{border-color:var(--accent4)!important;color:var(--accent4)!important}
+.section-label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.pill-green{background:#10b98120;color:#10b981;border:1px solid #10b98140}
+.pill-yellow{background:#f59e0b20;color:#f59e0b;border:1px solid #f59e0b40}
+.pill-red{background:#ef444420;color:#ef4444;border:1px solid #ef444440}
+.pill-blue{background:#6366f120;color:#6366f1;border:1px solid #6366f140}
+.pill-gray{background:#64748b20;color:#64748b;border:1px solid #64748b40}
+
+/* CONFLICT TABLE */
+.conflict-card{background:var(--surface);border:1px solid #ef444430;border-radius:12px;padding:18px 20px;margin-bottom:12px}
+.conflict-name{font-size:15px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.conflict-mids{display:flex;flex-wrap:wrap;gap:8px}
+.conflict-mid-tag{font-family:'Courier New',monospace;font-size:12px;padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2)}
+.conflict-mid-tag.primary{border-color:#10b98160;background:#10b98110;color:var(--accent2)}
+.conflict-mid-tag.conflict{border-color:#ef444460;background:#ef444410;color:var(--accent4)}
+
+/* AUTOFILL */
+.autofill-upload{border:2px dashed var(--border);border-radius:14px;padding:36px 28px;text-align:center;cursor:pointer;transition:.2s;background:var(--surface);margin-bottom:20px}
+.autofill-upload:hover,.autofill-upload.drag{border-color:#10b981;background:#10b98108}
+.autofill-upload h3{font-size:16px;font-weight:600;margin:12px 0 6px;color:var(--accent2)}
+.autofill-upload p{font-size:13px;color:var(--muted)}
+.autofill-summary{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;display:none}
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.sum-card{border-radius:10px;padding:14px 16px;text-align:center}
+.sum-card.filled{background:#10b98115;border:1px solid #10b98140}
+.sum-card.unfilled{background:#ef444415;border:1px solid #ef444440}
+.sum-card.unchanged{background:#6366f115;border:1px solid #6366f140}
+.sum-card.conflict-c{background:#f59e0b15;border:1px solid #f59e0b40}
+.sum-n{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.sum-n.filled{color:var(--accent2)}
+.sum-n.unfilled{color:var(--accent4)}
+.sum-n.unchanged{color:var(--accent)}
+.sum-n.conflict-c{color:var(--accent3)}
+.sum-l{font-size:12px;margin-top:4px}
+.autofill-rows-table{width:100%;border-collapse:collapse;font-size:12px}
+.autofill-rows-table thead th{padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface)}
+.autofill-rows-table tbody tr{border-bottom:1px solid #1c1c26}
+.autofill-rows-table tbody td{padding:8px 12px;vertical-align:top}
+.row-filled{background:#10b98108}
+.row-conflict{background:#f59e0b08}
+.row-unfilled{background:#ef444408}
+.status-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap}
+.sb-filled{background:#10b98125;color:#10b981}
+.sb-unfilled{background:#ef444425;color:#ef4444}
+.sb-conflict{background:#f59e0b25;color:#f59e0b}
+.sb-ok{background:#6366f125;color:#6366f1}
+.reason-text{font-size:11px;color:var(--muted);margin-top:3px;font-style:italic}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-icon">MID</div>
+    <div>
+      <div class="brand-name">MID Master Tool v2</div>
+      <div class="brand-sub">Manufacturer ID Database &mdash; Persistent Memory</div>
+    </div>
+  </div>
+  <div class="topbar-stats">
+    <div class="tstat"><div class="tstat-n" id="ts-total">0</div><div class="tstat-l">Manufacturers</div></div>
+    <div class="tstat"><div class="tstat-n" id="ts-files">0</div><div class="tstat-l">Files Loaded</div></div>
+    <div class="tstat"><div class="tstat-n" id="ts-blanks">0</div><div class="tstat-l">Blanks Tracked</div></div>
+    <div class="tstat"><div class="tstat-n" id="ts-conflicts">0</div><div class="tstat-l">MID Conflicts</div></div>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('search')">&#128269; Search</div>
+  <div class="tab" onclick="switchTab('autofill')">&#10024; Auto-Fill Manifest</div>
+  <div class="tab" onclick="switchTab('conflicts')">&#9888; MID Conflicts</div>
+  <div class="tab" onclick="switchTab('upload')">&#128194; Upload &amp; Learn</div>
+  <div class="tab" onclick="switchTab('analytics')">&#128202; Analytics</div>
+  <div class="tab" onclick="switchTab('database')">&#128451; Full Database</div>
+</div>
+
+<!-- SEARCH -->
+<div class="page active" id="tab-search">
+  <div class="search-hero">
+    <h2>Lookup Manufacturer ID</h2>
+    <p>Search by manufacturer name to get MID &mdash; or search by MID to get the manufacturer name</p>
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="e.g. JANNAT CRAFT  or  INJANCREJAI" autocomplete="off">
+      <select id="searchMode"><option value="auto">Auto Detect</option><option value="name">Name &rarr; MID</option><option value="mid">MID &rarr; Name</option></select>
+      <button onclick="doSearch()">Search</button>
+    </div>
+  </div>
+  <div class="alerts-bar" id="alertsBar"><div class="alerts-title">&#9888; Manufacturers with blank MIDs detected</div><div id="alertsList"></div></div>
+  <div id="searchResults"></div>
+</div>
+
+<!-- AUTO-FILL -->
+<div class="page" id="tab-autofill">
+  <div class="section-label">Auto-Fill a Raw Manifest</div>
+  <div style="background:#10b98108;border:1px solid #10b98130;border-radius:10px;padding:16px 20px;margin-bottom:20px;font-size:13px;color:var(--text);line-height:1.7">
+    <b style="color:var(--accent2)">How it works:</b> Upload any raw manifest file. The tool will scan every row, find blank <code style="background:var(--surface2);padding:1px 6px;border-radius:3px">itemManufacturerMID</code> or <code style="background:var(--surface2);padding:1px 6px;border-radius:3px">itemManufacturerName</code> cells, and fill them using the database &mdash; only if it finds an <b>exact match</b>. If a row has a MID conflict across manifests, it flags it and does NOT fill automatically. Anything it cannot resolve is clearly marked so you can review manually. The final filled file is then available to download.
+  </div>
+  <div class="autofill-upload" id="autofillZone" onclick="document.getElementById('autofillInput').click()">
+    <input type="file" id="autofillInput" accept=".xlsx,.xls" style="display:none">
+    <div class="upload-icon" style="font-size:36px">&#128203;</div>
+    <h3>Drop raw manifest here to auto-fill</h3>
+    <p>Blank MID or Name cells will be filled from the database &mdash; safely, with full audit trail</p>
+  </div>
+  <div class="autofill-summary" id="autofillSummary"></div>
+</div>
+
+<!-- CONFLICTS -->
+<div class="page" id="tab-conflicts">
+  <div class="section-label">MID Conflict Detector</div>
+  <div style="background:#ef444408;border:1px solid #ef444430;border-radius:10px;padding:16px 20px;margin-bottom:20px;font-size:13px;color:var(--text);line-height:1.7">
+    A conflict means the <b>same manufacturer name</b> appears with <b>different MIDs</b> across different manifest files. This could indicate a data entry error, name variation, or a genuine manufacturer change. These rows are flagged and will <b>NOT</b> be auto-filled &mdash; you must resolve them manually.
+  </div>
+  <div id="conflictsList"><div class="empty-state"><div class="big">&#10003;</div><h3>No conflicts detected</h3><p>All manufacturer names have consistent MIDs across all loaded manifests.</p></div></div>
+</div>
+
+<!-- UPLOAD & LEARN -->
+<div class="page" id="tab-upload">
+  <div class="section-label">Add New Manifests to Memory</div>
+  <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+    <input type="file" id="fileInput" accept=".xlsx,.xls" multiple style="display:none">
+    <div class="upload-icon">&#128230;</div>
+    <h3>Drop manifest files here or click to browse</h3>
+    <p>New MIDs merged automatically &bull; Conflicts detected &bull; Database saved in browser permanently</p>
+  </div>
+  <div class="upload-log" id="uploadLog" style="display:none"></div>
+  <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn" onclick="exportDB()">&#8595; Export Database (JSON)</button>
+    <button class="btn btn-danger" onclick="clearDB()">&#128465; Reset to Original 306</button>
+  </div>
+</div>
+
+<!-- ANALYTICS -->
+<div class="page" id="tab-analytics">
+  <div class="analytics-grid" id="analyticsCards"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="chart-wrap" id="chartByFile"></div>
+    <div class="chart-wrap" id="chartByCity"></div>
+  </div>
+  <div class="chart-wrap" id="chartBlankMfrs"></div>
+</div>
+
+<!-- DATABASE -->
+<div class="page" id="tab-database">
+  <div class="table-controls">
+    <input type="text" id="filterInput" placeholder="Filter by name, MID, or source file..." oninput="renderTable()">
+    <span class="row-count" id="rowCount"></span>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr>
+      <th onclick="sortTable('name')">Manufacturer Name &#8597;</th>
+      <th onclick="sortTable('mid')">MID &#8597;</th>
+      <th onclick="sortTable('source')">Source File &#8597;</th>
+      <th onclick="sortTable('added')">Added &#8597;</th>
+    </tr></thead>
+    <tbody id="tableBody"></tbody>
+  </table></div>
+</div>
+
+<script>
+const SK='mid_master_db_v2',FK='mid_master_files_v2',BK='mid_master_blanks_v2',CK='mid_master_conflicts_v2';
+const SEED={"A&A Company":{"mid":"INAACOM147JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000001},"DEVARSH HANDICRAFTS":{"mid":"INDEVHANJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000002},"Shri Durga Creation":{"mid":"INSHRDUR214JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000003},"MIRZAYAA":{"mid":"INMIR117JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000004},"DINESH EXPORTS":{"mid":"INDINEXP57JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000005},"HEAVENLY HOMES":{"mid":"INHEAHOM2316JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000006},"JAI AMBEY INTERNATIONAL":{"mid":"INJAIAMB123JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000007},"JAINSCLOTHING OVERSEAS PRIVATE LIMITED":{"mid":"INJAIOVE2JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000008},"Panihari Collection Centre":{"mid":"INPANCOL73JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000009},"THE URBAN FABRICS":{"mid":"INURBFAB26JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000010},"KAVYA ENTERPRISES & ACCESSORIES":{"mid":"INKAVENT1054JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000011},"BHATYANI HANDICRAFT":{"mid":"INBHAHAN119JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000012},"SHRI SHYAM EXPORT":{"mid":"INSHRSHY16JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000013},"THE COZY CREATIONS":{"mid":"INCOZCRE73JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000014},"AYESHA EXPORTS":{"mid":"INAYEEXP12JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000015},"Ethnicfashville Enterprises":{"mid":"INETHENT39JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000016},"Aadikart":{"mid":"INAAD95SOU","source":"098-30380394_Manifest__1_.xlsx","added":1700000017},"NAMOKAR FASHION":{"mid":"INNAMFAS42JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000018},"SAKAMBRI HANDICRAFTS":{"mid":"INSAKHAN2JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000019},"Eyeconic Indian Art":{"mid":"INEYEIND58JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000020},"KRISHNA TEXTILE":{"mid":"INKRITEXJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000021},"TRADITIONAL JAIPUR EXPORTS":{"mid":"INTRAJAI9117JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000022},"Lee-John Fashion":{"mid":"INLEEFAS32FAR","source":"098-30380394_Manifest__1_.xlsx","added":1700000023},"GANESH ART EXPORT":{"mid":"INGANARTJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000024},"Veeru Enterprise":{"mid":"INVEEENT124SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000025},"KHEDAPATI EXPORT":{"mid":"INKHEEXP129JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000026},"A L EXPORTS":{"mid":"INALEXP1610NEW","source":"098-30380394_Manifest__1_.xlsx","added":1700000027},"JEYPORE TEXTILES":{"mid":"INJEYTEX3020JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000028},"BLESS INDIA":{"mid":"INBLEIND24JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000029},"GAYTRI HANDICRAFT":{"mid":"INGAYHAN31JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000030},"RED ROSE CRAFTS HOUSE":{"mid":"INREDROS1BIJ","source":"098-30380394_Manifest__1_.xlsx","added":1700000031},"RAGHAV HANDLOOM AND HANDICRAFTS":{"mid":"INRAGHAN31JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000032},"SURENDRA KUMAR BAIRWA":{"mid":"INSURKUM129JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000033},"OMJA ARTISANSHIP PRIVATE LIMITED":{"mid":"INOMJARTKAS","source":"098-30380394_Manifest__1_.xlsx","added":1700000034},"GANGWAL EXPORT":{"mid":"INGANEXP150JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000035},"AACEX":{"mid":"INAAC24SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000036},"UNITI INTERNATIONAL":{"mid":"INUNIINT6SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000037},"Jaydip Goti":{"mid":"INJAYGOT4034SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000038},"HITHAKSHI HANDICRAFT":{"mid":"INHITHAN43JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000039},"JAIF TEXTILES":{"mid":"INJAITEX445JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000040},"SAVI HANDICRAFT":{"mid":"INSAVHAN31JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000041},"FEEDBACK HOMES GLOBAL":{"mid":"INFEEHOM87SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000042},"Nimbark Enterprise":{"mid":"INNIMENT1541SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000043},"NILYAM":{"mid":"INNIL5SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000044},"DLIGHT ENTERPRISE":{"mid":"INDLIENT33SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000045},"YOGI FASHION":{"mid":"INYOGFAS51SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000046},"LATESTS FASHION":{"mid":"INLATFAS32SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000047},"KRITVA FASHION":{"mid":"INKRIFAS123SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000048},"YOGIDHARA CREATION":{"mid":"INYOGCRE19SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000049},"BALAJI FASHION":{"mid":"INBALFAS7524JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000050},"SAFANI GEMS":{"mid":"INSAFGEM74JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000051},"MANISHA EXPORT":{"mid":"INMANEXP57JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000052},"NEVAAN ENTERPRISES":{"mid":"INNEVENT64JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000053},"Rajhans Export":{"mid":"INRAJEXP432JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000054},"SEEMA EXPORT":{"mid":"INSEEEXP57JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000055},"HK HOUSE":{"mid":"INHKHOU7210JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000056},"Love Gift Forever":{"mid":"INLOVGIF114JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000057},"KOLAWAT EXPORT":{"mid":"INKOLEXPTON","source":"098-30380394_Manifest__1_.xlsx","added":1700000058},"INDIGO FAB":{"mid":"ININDFAB379JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000059},"SHIV HANDICRAFT":{"mid":"INSHIHAN43JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000060},"Purvi Fashion Point":{"mid":"INPURFAS32JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000061},"B K ASSOCIATES":{"mid":"INBKASS654JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000062},"Advant Mediacom":{"mid":"INADVMED167DEL","source":"098-30380394_Manifest__1_.xlsx","added":1700000063},"NITAYRA":{"mid":"INNIT12ALW","source":"098-30380394_Manifest__1_.xlsx","added":1700000064},"REYAANSH INTERNATIONAL":{"mid":"INREYINT3020JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000065},"SKYVIEW FASHION":{"mid":"INSKYFAS328SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000066},"SHREE ENTERPRISES JPR":{"mid":"INSHRENT114JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000067},"1ON1 Enterprises":{"mid":"IN1ONENT119JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000068},"LIFE STYLE":{"mid":"INLIFSTYHAR","source":"098-30380394_Manifest__1_.xlsx","added":1700000069},"SHYAM ENTERPRISES":{"mid":"INSHYENT12JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000070},"PASHA INDIA":{"mid":"INPASIND3020JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000071},"SUNITA EXPORT":{"mid":"INSUNEXP135JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000072},"Shree Shyam Enterprises":{"mid":"INSHRSHY3669JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000073},"SHREE SHAVRIYA CRAFT":{"mid":"INSHRSHA7TON","source":"098-30380394_Manifest__1_.xlsx","added":1700000074},"MAHALAXMEE HANDICRAFT":{"mid":"INMAHHAN771JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000075},"FANCY HANDICRAFTS":{"mid":"INFANHAN250MEE","source":"098-30380394_Manifest__1_.xlsx","added":1700000076},"VastraMilap":{"mid":"INVAS1100SHA","source":"098-30380394_Manifest__1_.xlsx","added":1700000077},"NAVIN":{"mid":"INNAVJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000078},"SHRI LAKHDATAR HANDICRAFT":{"mid":"INSHRLAKALW","source":"098-30380394_Manifest__1_.xlsx","added":1700000079},"NAZIA INTERNATIONAL":{"mid":"INNAZINT1421JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000080},"KANAK FASHION":{"mid":"INKANFAS77JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000081},"Kalyna Creation":{"mid":"INKALCRE147JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000082},"ANUSHKA CREATION":{"mid":"INANUCRE57JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000083},"SHIP2GETHER LOGISTICS PVT LTD":{"mid":"INSHILOG11JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000084},"ANJLI EXPORT":{"mid":"INANJEXP51JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000085},"Wgloryind":{"mid":"INWGL9182NOR","source":"098-30380394_Manifest__1_.xlsx","added":1700000086},"NAAZ CREATION":{"mid":"INNAACRE19JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000087},"Comfyeco":{"mid":"INCOM14JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000088},"PINKCITY ART PARADISE":{"mid":"INPINART3003JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000089},"SAWARIYA EXPORT":{"mid":"INSAWEXP31JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000090},"INFINITE JEWELLERY EXPORTS":{"mid":"ININFJEW389JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000091},"LOYAL ENTERPRISES":{"mid":"INLOYENT85LOR","source":"098-30380394_Manifest__1_.xlsx","added":1700000092},"Exotica Attire":{"mid":"INEXOATT88JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000093},"FABRICATEFIZZ":{"mid":"INFAB84JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000094},"BAINIWAL EXPORT":{"mid":"INBAIEXP126JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000095},"Samriddhi Enterprises":{"mid":"INSAMENT77JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000096},"PARWANI'S":{"mid":"INPARJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000097},"THE FABRIA":{"mid":"INFAB73JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000098},"VEDHEX PRIVATE LIMITED":{"mid":"INVEDPRI58MAD","source":"098-30380394_Manifest__1_.xlsx","added":1700000099},"SRK CORPORATION":{"mid":"INSRKCOR9HAR","source":"098-30380394_Manifest__1_.xlsx","added":1700000100},"J.A.HANDICRAFTS":{"mid":"INJAHHAR","source":"098-30380394_Manifest__1_.xlsx","added":1700000101},"GAUR NAUTICAL COLLECTION":{"mid":"INGAUNAU5162HAR","source":"098-30380394_Manifest__1_.xlsx","added":1700000102},"SMACK TRADERS":{"mid":"INSMATRA201IND","source":"098-30380394_Manifest__1_.xlsx","added":1700000103},"NISAR AHAMAD":{"mid":"INNISAHA2476HAR","source":"098-30380394_Manifest__1_.xlsx","added":1700000104},"S R ENTERPRISES":{"mid":"INSRENT79JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000105},"SIDDHI VINAYAK CRAFTS":{"mid":"INSIDVIN200JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000106},"SHRI PALIWAL TEXTILE & HANDICRAFT":{"mid":"INSHRPALJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000107},"Varni Corporation":{"mid":"INVARCOR3SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000108},"BAHARA EXPORT":{"mid":"INBAHEXP13JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000109},"Nirvella":{"mid":"INNIR39SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000110},"THE RED LION ENTERPRISE":{"mid":"INREDLIO202SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000111},"JANTA EXPORT":{"mid":"INJANEXP126JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000112},"MUNNA FASHION":{"mid":"INMUNFASJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000113},"MAM TREASURES":{"mid":"INMAMTRE2JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000114},"FATIMA ARTS":{"mid":"INFATART34JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000115},"RUDRIKA CREATION":{"mid":"INRUDCRE512SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000116},"SATYAM CREATION jaipur":{"mid":"INSATCRE3020JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000117},"SAINLY INTERNATIONAL":{"mid":"INSAIINT236JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000118},"NICOBAR DESIGN PRIVATE LIMITED":{"mid":"INNICDES5923GUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000119},"JA LIFESTYLE":{"mid":"INJALIF142MUM","source":"098-30380394_Manifest__1_.xlsx","added":1700000120},"AADITYA ENTERPRISES":{"mid":"INAADENT91JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000121},"RAHUL TRADERS":{"mid":"INRAHTRA3020JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000122},"AA ENTERPRISES":{"mid":"INAAENT107SOU","source":"098-30380394_Manifest__1_.xlsx","added":1700000123},"TRADERINDIA345":{"mid":"INTRA2142SOU","source":"098-30380394_Manifest__1_.xlsx","added":1700000124},"R K HANDICRAFTS AND EXPORTERS":{"mid":"INRKHAN111JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000125},"Shahnoor":{"mid":"INSHA2476ROO","source":"098-30380394_Manifest__1_.xlsx","added":1700000126},"M/S UNITED CREATION":{"mid":"INMSUNIJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000127},"JAY MATAJI HANDICRAFTS":{"mid":"INJAYMAT141UDA","source":"098-30380394_Manifest__1_.xlsx","added":1700000128},"MANGLAM INTERNATIONAL":{"mid":"INMANINT29JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000129},"M.R. ENTERPRISES":{"mid":"INMRENTHAR","source":"098-30380394_Manifest__1_.xlsx","added":1700000130},"shreejaa sales":{"mid":"INSHRSAL462NOR","source":"098-30380394_Manifest__1_.xlsx","added":1700000131},"IBA CRAFTS PRIVATE LIMITED":{"mid":"INIBACRA17GAU","source":"098-30380394_Manifest__1_.xlsx","added":1700000132},"BABITA TEX":{"mid":"INBABTEX192JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000133},"NILEHARI HANDICRAFTS":{"mid":"INNILHAN7JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000134},"M S CHHIPAARTS":{"mid":"INMSCHH287JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000135},"ANGEL HANDICRAFTS":{"mid":"INANGHAN332JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000136},"PRIYA'S STORE":{"mid":"INPRISTO1118JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000137},"SRG IMPEX":{"mid":"INSRGIMP189JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000138},"EXPORT PROFILE":{"mid":"INEXPPRO10JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000139},"NEW TASTE OF INDIA":{"mid":"INNEWTASJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000140},"KIRTI LAPIDARY EXPORTS PRIVATE LIMITED":{"mid":"INKIRLAP5JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000141},"RAINBOW HANDICRAFT":{"mid":"INRAIHAN21RAJ","source":"098-30380394_Manifest__1_.xlsx","added":1700000142},"LA MODA CREATIONS":{"mid":"INLAMODJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000143},"SHEELTEX (INDIA)":{"mid":"INSHEIND106WES","source":"098-30380394_Manifest__1_.xlsx","added":1700000144},"RAMU QTH E-TECH PROCESS":{"mid":"INRAMQTH6359SAL","source":"098-30380394_Manifest__1_.xlsx","added":1700000145},"A S ENTERPRISES":{"mid":"INASENT1610SOU","source":"098-30380394_Manifest__1_.xlsx","added":1700000146},"Craft Cafe India":{"mid":"INCRACAF2AJM","source":"098-30380394_Manifest__1_.xlsx","added":1700000147},"ROYAL ART":{"mid":"INROYART3020JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000148},"M/S RADHIKA FASHION":{"mid":"INMSRAD4099JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000149},"UJAS EXPORTS PRIVATE LIMITED":{"mid":"INUJAEXP51JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000150},"KANCHA":{"mid":"INKAN826DEL","source":"098-30380394_Manifest__1_.xlsx","added":1700000151},"Interior makeovers":{"mid":"ININTMAK285JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000152},"PALIWAL TEXTILES":{"mid":"INPALTEXJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000153},"RAKESH KUMAR VAID":{"mid":"INRAKKUM3JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000154},"IN BRIDALFASHION":{"mid":"ININBRI407SUR","source":"098-30380394_Manifest__1_.xlsx","added":1700000155},"ADINATH CREATION":{"mid":"INADICRE198JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000156},"HAMDAN ENTERPRISES":{"mid":"INHAMENT2476HAR","source":"098-30380394_Manifest__1_.xlsx","added":1700000157},"Indigo Consignor":{"mid":"ININDCON8625JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000158},"GR OVERSEAS":{"mid":"INGROVE4PAL","source":"098-30380394_Manifest__1_.xlsx","added":1700000159},"ETHNIC TEXTILE":{"mid":"INETHTEX11JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000160},"RIWANSH HANDICRAFT":{"mid":"INRIWHAN42JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000161},"Fashion Empire":{"mid":"INFASEMP403GHA","source":"098-30380394_Manifest__1_.xlsx","added":1700000162},"RUDRAKSH ENTERPRISES":{"mid":"INRUDENT25JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000163},"SRD CREATION":{"mid":"INSRDCRETON","source":"098-30380394_Manifest__1_.xlsx","added":1700000164},"M/S PRATHMIKTA INTERNATIONAL":{"mid":"INMSPRA1BIJ","source":"098-30380394_Manifest__1_.xlsx","added":1700000165},"SPARSHH":{"mid":"INSPA3020JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000166},"GOPI AND SONS":{"mid":"INGOPSON1JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000167},"CREATION BY MANJU SONI":{"mid":"INCREBYJAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000168},"DHAKA INTERNATIONAL":{"mid":"INDHAINT12JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000169},"TAGAAI":{"mid":"INTAG34JAI","source":"098-30380394_Manifest__1_.xlsx","added":1700000170},"KIYA FASHION":{"mid":"INKIYFAS57JAI","source":"098-30631300_Manifest.xlsx","added":1700000171},"A.R.EXPORTS":{"mid":"INARE9JAI","source":"098-30631300_Manifest.xlsx","added":1700000172},"NILESH ARTS":{"mid":"INNILART2JAI","source":"098-30631300_Manifest.xlsx","added":1700000173},"CRAFTS AVENUE":{"mid":"INCRAAVEJAI","source":"098-30631300_Manifest.xlsx","added":1700000174},"HONEY GEMS":{"mid":"INHONGEM1711JAI","source":"098-30631300_Manifest.xlsx","added":1700000175},"ARYA AIRWAYS":{"mid":"INARYAIR4427JAI","source":"098-30631300_Manifest.xlsx","added":1700000176},"VIJAY RETAIL":{"mid":"INVIJRET299JAI","source":"098-30631300_Manifest.xlsx","added":1700000177},"FIBRE GOLD":{"mid":"INFIBGOL4SOU","source":"098-30631300_Manifest.xlsx","added":1700000178},"Anish Fab":{"mid":"INANIFAB107SUR","source":"098-30631300_Manifest.xlsx","added":1700000179},"VR Autopedia":{"mid":"INVRAUT187FAR","source":"098-30631300_Manifest.xlsx","added":1700000180},"Artsy Home":{"mid":"INARTHOM134BAR","source":"098-30631300_Manifest.xlsx","added":1700000181},"SANSKRITI INDIA":{"mid":"INSANINDGWA","source":"098-30631300_Manifest.xlsx","added":1700000182},"SHOPMART":{"mid":"INSHO3020JAI","source":"098-30631300_Manifest.xlsx","added":1700000183},"LABHANSHI INTERNATIONAL":{"mid":"INLABINT177JAI","source":"098-30631300_Manifest.xlsx","added":1700000184},"TEAXPRESS PRIVATE LIMITED":{"mid":"INTEAPRI3199JAL","source":"098-30631300_Manifest.xlsx","added":1700000185},"GULAAL":{"mid":"INGUL3JAI","source":"098-30631300_Manifest.xlsx","added":1700000186},"CRAFT BAZAAR":{"mid":"INCRABAZ676NEW","source":"098-30631300_Manifest.xlsx","added":1700000187},"EMINENT CORPORATION":{"mid":"INEMICOR212JAI","source":"098-30631300_Manifest.xlsx","added":1700000188},"RUGSCARPET CRAFTS":{"mid":"INRUGCRA229JAI","source":"098-30631300_Manifest.xlsx","added":1700000189},"Vinayaka Sales":{"mid":"INVINSAL22BHI","source":"098-30631300_Manifest.xlsx","added":1700000190},"M/S M. A. & SONS":{"mid":"INMSMA61HAR","source":"098-30631300_Manifest.xlsx","added":1700000191},"TBOF FOODS PRIVATE LIMITED":{"mid":"INTBOFOO152PUN","source":"125-10322874_Manifest.xlsx","added":1700000192},"RUPAL'S FASHION":{"mid":"INRUPFAS20JAI","source":"125-10322874_Manifest.xlsx","added":1700000193},"NIMANAL SALES AGENCIES":{"mid":"INNIMSAL2829SUR","source":"125-10322874_Manifest.xlsx","added":1700000194},"BANJARA BAZZAR":{"mid":"INBANBAZ59JAI","source":"125-10322874_Manifest.xlsx","added":1700000195},"CRAFT AURA":{"mid":"INCRAAUR28JAI","source":"125-10322874_Manifest.xlsx","added":1700000196},"VIRANAM INDIA PRIVATE LIMITED":{"mid":"INVIRIND3020JAI","source":"125-10322874_Manifest.xlsx","added":1700000197},"Durga Export":{"mid":"INDUREXP32JAI","source":"098-30621076_Manifest.xlsx","added":1700000198},"Ganer Exports":{"mid":"INGANEXP211NAG","source":"098-30621076_Manifest.xlsx","added":1700000199},"BANJARA DECOR":{"mid":"INBANDEC52JAI","source":"098-30621076_Manifest.xlsx","added":1700000200},"SHIVANI FASHIONS":{"mid":"INSHIFAS3JAI","source":"098-30621076_Manifest.xlsx","added":1700000201},"K.K Enterprises":{"mid":"PKKKENT258KHA","source":"098-30621076_Manifest.xlsx","added":1700000202},"SHRISTY HARDWARE":{"mid":"INSHRHARALI","source":"098-30621076_Manifest.xlsx","added":1700000203},"CHOUDHARY GEMS & CRAFTS":{"mid":"INCHOGEM147JAI","source":"098-30621076_Manifest.xlsx","added":1700000204},"DECOR 8":{"mid":"INDEC3410GUR","source":"098-30621076_Manifest.xlsx","added":1700000205},"Cohsar MT":{"mid":"INCOHMTBIJ","source":"098-30621076_Manifest.xlsx","added":1700000206},"SOFT TOUCH FABRIC TEXTILE":{"mid":"INSOFTOU6411JAI","source":"098-30621076_Manifest.xlsx","added":1700000207},"SHODHARINEE":{"mid":"INSHO3020JAI","source":"098-30621076_Manifest.xlsx","added":1700000208},"KAMLA EXPORT":{"mid":"INKAMEXP14JAI","source":"098-30621076_Manifest.xlsx","added":1700000209},"GlammTexa":{"mid":"INGLA13JAI","source":"098-30621076_Manifest.xlsx","added":1700000210},"NR IT SOLUTIONS":{"mid":"INNRIT31JAI","source":"098-30621076_Manifest.xlsx","added":1700000211},"CITY ENTERPRISES":{"mid":"INCITENT107NEW","source":"098-30621076_Manifest.xlsx","added":1700000212},"SHRI KRISHNA ASSOCIATES":{"mid":"INSHRKRI102GAU","source":"098-30621076_Manifest.xlsx","added":1700000213},"SRV Enterprises":{"mid":"INSRVENTJAI","source":"098-30621076_Manifest.xlsx","added":1700000214},"FABRIC FAB CRAFT":{"mid":"INFABFAB909JAI","source":"098-30621076_Manifest.xlsx","added":1700000215},"PLANET ARTS":{"mid":"INPLAART31JAI","source":"098-30621076_Manifest.xlsx","added":1700000216},"SILVER ART JEWELLERY":{"mid":"INSILART1078JAI","source":"098-30621076_Manifest.xlsx","added":1700000217},"PRATIK JEWELLERS":{"mid":"INPRAJEW1078JAI","source":"098-30621076_Manifest.xlsx","added":1700000218},"THE CREATIVE CRAFTER":{"mid":"INCRECRA798ROO","source":"098-30621076_Manifest.xlsx","added":1700000219},"KRISHA ENTERPRISE":{"mid":"INKRIENT604SUR","source":"098-30621076_Manifest.xlsx","added":1700000220},"S.K. HOSIERY":{"mid":"INSKHOS242HAR","source":"098-30621076_Manifest.xlsx","added":1700000221},"NDC ENTERPRISES":{"mid":"INNDCENTROO","source":"098-30621076_Manifest.xlsx","added":1700000222},"VINTAGE VISION":{"mid":"INVINVIS4099JAI","source":"098-30629185_Manifest.xlsx","added":1700000223},"Amera Brothers":{"mid":"INAMEBRO56JAI","source":"098-30629185_Manifest.xlsx","added":1700000224},"M/S  ZCARE PHARMA PRIVATE LIMITED":{"mid":"INMSZCA144LUC","source":"098-30629185_Manifest.xlsx","added":1700000225},"EARTHSTAR RUGS":{"mid":"INEARRUGMIR","source":"098-30629185_Manifest.xlsx","added":1700000226},"MARVEL RETAIL PRIVATE LIMITED":{"mid":"INMARRET37UDA","source":"098-30629185_Manifest.xlsx","added":1700000227},"KRISHNA HANDICRAFTS":{"mid":"INKRIHAN73AGR","source":"098-30629185_Manifest.xlsx","added":1700000228},"Bilsman Enterprises":{"mid":"INBILENT151NOR","source":"098-30629185_Manifest.xlsx","added":1700000229},"M/S PDH COLLECTIONS":{"mid":"INMSPDH206GAU","source":"098-30629185_Manifest.xlsx","added":1700000230},"SOLARIS & CO":{"mid":"INSOLCO4620BHO","source":"098-30629185_Manifest.xlsx","added":1700000231},"ANTARMANA FASHION":{"mid":"INANTFAS3020JAI","source":"098-30629185_Manifest.xlsx","added":1700000232},"CRAFT EXIM":{"mid":"INCRAEXI4405DEL","source":"098-30629185_Manifest.xlsx","added":1700000233},"No Nasties Pvt. Ltd":{"mid":"INNONAS453GOA","source":"098-30629185_Manifest.xlsx","added":1700000234},"Utsav Export":{"mid":"INUTSEXP8JAI","source":"098-30629185_Manifest.xlsx","added":1700000235},"HANDICRAFT STORE":{"mid":"INHANSTO9829JAI","source":"098-30629185_Manifest.xlsx","added":1700000236},"THE VINTAGE TEXTILE":{"mid":"INVINTEX2002JAI","source":"098-30629185_Manifest.xlsx","added":1700000237},"Thechokhi":{"mid":"INTHE215JAI","source":"098-30629185_Manifest.xlsx","added":1700000238},"JAIPURITE CORPORATION":{"mid":"INJAICOR3020JAI","source":"098-30629185_Manifest.xlsx","added":1700000239},"SHWETRAS DAIRY":{"mid":"INSHWDAI17JAI","source":"098-30629185_Manifest.xlsx","added":1700000240},"Vishal Works":{"mid":"INVISWOR49MEE","source":"098-30629185_Manifest.xlsx","added":1700000241},"M/S R K ANTIQUE COLLECTION":{"mid":"INMSRK1150HAR","source":"098-30629185_Manifest.xlsx","added":1700000242},"FATIMA ENTERPRISES":{"mid":"INFATENT839HAR","source":"098-30629185_Manifest.xlsx","added":1700000243},"MS TRADERS":{"mid":"INMSTRA1845CEN","source":"098-30629185_Manifest.xlsx","added":1700000244},"JEWELS PRIME":{"mid":"INJEWPRI35JAI","source":"098-30629185_Manifest.xlsx","added":1700000245},"GANESHOM INFOTECH":{"mid":"INGANINF1515JAI","source":"098-30629185_Manifest.xlsx","added":1700000246},"RUPA HANDICRAFTS":{"mid":"INRUPHAN113JAI","source":"098-30629185_Manifest.xlsx","added":1700000247},"CNS FASHION":{"mid":"INCNSFASJAI","source":"098-30629185_Manifest.xlsx","added":1700000248},"PRIYANSHI CREATIONS":{"mid":"INPRICRE343JAI","source":"098-30629185_Manifest.xlsx","added":1700000249},"PB HANDICRAFT":{"mid":"INPBHAN43JAI","source":"098-30629185_Manifest.xlsx","added":1700000250},"KESHAV CRAFT":{"mid":"INKESCRAJAI","source":"098-30629185_Manifest.xlsx","added":1700000251},"Vineetha":{"mid":"INVIN18MUM","source":"098-30629185_Manifest.xlsx","added":1700000252},"Wood Engraving Store":{"mid":"INWOOENG258ROO","source":"098-30629185_Manifest.xlsx","added":1700000253},"AUTHENTIC BRASS INSTRUMENTS":{"mid":"INAUTBRA284HAR","source":"098-30629185_Manifest.xlsx","added":1700000254},"Balaji Enterprises":{"mid":"INBALENT41JAI","source":"098-30629185_Manifest.xlsx","added":1700000255},"BALAJI MUSIC ART & CRAFT":{"mid":"INBALMUS66JAI","source":"098-30629185_Manifest.xlsx","added":1700000256},"KOMAL CRAFT":{"mid":"INKOMCRA34JAI","source":"098-30629185_Manifest.xlsx","added":1700000257},"HUNNYSUNNY PRIVATE LIMITED":{"mid":"INHUNPRI8JAI","source":"098-30629185_Manifest.xlsx","added":1700000258},"KDS Enterprises":{"mid":"INKDSENT62NOR","source":"098-30629185_Manifest.xlsx","added":1700000259},"Spark India":{"mid":"INSPAIND29JAI","source":"098-30629185_Manifest.xlsx","added":1700000260},"M S TRIKUT LEATHER ENTERPRISES":{"mid":"INMSTRI2098UNN","source":"098-30629185_Manifest.xlsx","added":1700000261},"FASHION POINT":{"mid":"INFASPOI76GAU","source":"098-30629185_Manifest.xlsx","added":1700000262},"CHOCOCRAFT CREATIONS PRIVATE LIMITED":{"mid":"INCHOCRE2112SOU","source":"098-30629185_Manifest.xlsx","added":1700000263},"FOURTEEN EIGHTEEN MOTOLIFE LLP":{"mid":"INFOUEIG207GUR","source":"098-30629185_Manifest.xlsx","added":1700000264},"RIVER WALKING HOME":{"mid":"INRIVWAL49BIK","source":"098-30629185_Manifest.xlsx","added":1700000265},"Kanhaiya Enterprises":{"mid":"INKANENT165NOR","source":"098-30629185_Manifest.xlsx","added":1700000266},"SS DESIGNS":{"mid":"INSSDES1261JAI","source":"057-58599240_Manifest.xlsx","added":1700000267},"TANISHKA HANDICRAFT":{"mid":"INTANHANTON","source":"057-58599240_Manifest.xlsx","added":1700000268},"Relytek Ventures Private Limited":{"mid":"INRELVEN1204GRE","source":"057-58599240_Manifest.xlsx","added":1700000269},"RELAXFEEL FABRICS":{"mid":"INRELFAB82JAI","source":"057-58599240_Manifest.xlsx","added":1700000270},"YOGIDHARA ART":{"mid":"INYOGART1861SUR","source":"057-58599240_Manifest.xlsx","added":1700000271},"Ashish Narola":{"mid":"INASHNAR24SUR","source":"057-58599240_Manifest.xlsx","added":1700000272},"JANNAT CREATION":{"mid":"INJANCREJAI","source":"057-58599240_Manifest.xlsx","added":1700000273},"AUZA JEWELS":{"mid":"INAUZJEW11JAI","source":"057-58599240_Manifest.xlsx","added":1700000274},"GOYAL FASHION":{"mid":"INGOYFAS101SUR","source":"057-58599240_Manifest.xlsx","added":1700000275},"KARTIK KUMAR SINGRODIA":{"mid":"INKARKUM26JAI","source":"057-58599240_Manifest.xlsx","added":1700000276},"GLOBAL LUMINOUS":{"mid":"INGLOLUMROO","source":"057-58599240_Manifest.xlsx","added":1700000277},"LUCK AGATE":{"mid":"INLUCAGA618ANA","source":"057-58599240_Manifest.xlsx","added":1700000278},"CICERIA VENTURES LLP":{"mid":"INCICVEN1012FAR","source":"057-58599240_Manifest.xlsx","added":1700000279},"TWELVEN":{"mid":"INTWE9JAI","source":"057-58599240_Manifest.xlsx","added":1700000280},"SHRAMYA MUSICAL LLP":{"mid":"INSHRMUS488LON","source":"057-58599240_Manifest.xlsx","added":1700000281},"Pooja Handicrafts":{"mid":"INPOOHAN121JAI","source":"057-58599240_Manifest.xlsx","added":1700000282},"TRADE STAR EXPORTS":{"mid":"INTRASTA1256JAI","source":"057-58599240_Manifest.xlsx","added":1700000283},"UY SCUTI COLLECTION":{"mid":"INUYSCU6612HAR","source":"932-77334143_Manifest.xlsx","added":1700000284},"VIDISH & CO":{"mid":"INVIDCO44JAI","source":"932-77334143_Manifest.xlsx","added":1700000285},"NVR HOME DECOR":{"mid":"INNVRHOM2JAI","source":"932-77334143_Manifest.xlsx","added":1700000286},"VINTAGE JUPITAR":{"mid":"INVINJUP33HAR","source":"932-77334143_Manifest.xlsx","added":1700000287},"Tanisha Enterprises":{"mid":"INTANENTJAI","source":"932-77334143_Manifest.xlsx","added":1700000288},"Riddhi Siddhi Exports":{"mid":"INRIDSID9JAI","source":"932-77334143_Manifest.xlsx","added":1700000289},"AJ Enterprises":{"mid":"INAJENT40SOU","source":"932-77334143_Manifest.xlsx","added":1700000290},"ARTISTA RUGS INDIA PRIVATE LIMITED":{"mid":"INARTRUGSAN","source":"057-58599531_Manifest.xlsx","added":1700000291},"JAIN HANDICRAFT":{"mid":"INJAIHAN5174JAI","source":"057-58599531_Manifest.xlsx","added":1700000292},"JAIPUR HASTKAR":{"mid":"INJAIHASJAI","source":"057-58599531_Manifest.xlsx","added":1700000293},"AJMERA":{"mid":"INAJM9196SUR","source":"057-58599531_Manifest.xlsx","added":1700000294},"S.R SHOPPINGWALA":{"mid":"INSRSHO3941SUR","source":"057-58599531_Manifest.xlsx","added":1700000295},"INDIAN CHAINMAIL ARMOUR":{"mid":"ININDCHA2500MEE","source":"057-58599531_Manifest.xlsx","added":1700000296},"LERANATH FASHION HOUSE":{"mid":"INLERFAS1502SUR","source":"057-58599531_Manifest.xlsx","added":1700000297},"LIBAS B2B":{"mid":"INLIBB2B143NEW","source":"057-58599531_Manifest.xlsx","added":1700000298},"Cargo Soul":{"mid":"INCARSOU59NOR","source":"057-58599531_Manifest.xlsx","added":1700000299},"CRYSTAL INDIA GEMSTONE":{"mid":"INCRYINDJAI","source":"057-58599531_Manifest.xlsx","added":1700000300},"M/S MAA KAMAKHYA HARDWARE":{"mid":"INMSMAAALI","source":"057-58599531_Manifest.xlsx","added":1700000301},"GOYAL HOME AND LIFESTYLE":{"mid":"INGOYHOM2313JAI","source":"057-58599531_Manifest.xlsx","added":1700000302},"AAMERA EXPORT":{"mid":"INAAMEXP289JAI","source":"057-58599531_Manifest.xlsx","added":1700000303},"Gulabi Gangaur":{"mid":"INGULGAN23JAI","source":"057-58599531_Manifest.xlsx","added":1700000304},"DENISH FASHION":{"mid":"INDENFAS183JAI","source":"057-58599531_Manifest.xlsx","added":1700000305},"NEW BHUSHAN MACHINERY STORE":{"mid":"INNEWBHU11SIR","source":"057-58599531_Manifest.xlsx","added":1700000306}};
+const SEED_FILES=["098-30380394_Manifest__1_.xlsx","098-30631300_Manifest.xlsx","125-10322874_Manifest.xlsx","098-30621076_Manifest.xlsx","098-30629185_Manifest.xlsx","057-58599240_Manifest.xlsx","932-77334143_Manifest.xlsx","057-58599531_Manifest.xlsx"];
+const SEED_BLANKS=[{name:'V Vineetha',file:'057-58599531_Manifest.xlsx'},{name:'JAIPUR PRINTS TEXTILE',file:'057-58599531_Manifest.xlsx'},{name:'JANNAT CRAFT',file:'057-58599531_Manifest.xlsx'},{name:'Sambhav Industries',file:'057-58599531_Manifest.xlsx'}];
+
+let db={},files=new Set(),blanks=[],conflicts={},sortKey='name',sortAsc=true;
+
+function loadStorage(){
+  try{
+    const d=localStorage.getItem(SK); db=d?JSON.parse(d):{...SEED};
+    const f=localStorage.getItem(FK); files=f?new Set(JSON.parse(f)):new Set(SEED_FILES);
+    const b=localStorage.getItem(BK); blanks=b?JSON.parse(b):[...SEED_BLANKS];
+    const c=localStorage.getItem(CK); conflicts=c?JSON.parse(c):{};
+  }catch(e){db={...SEED};files=new Set(SEED_FILES);blanks=[...SEED_BLANKS];conflicts={};}
+}
+function saveStorage(){
+  localStorage.setItem(SK,JSON.stringify(db));
+  localStorage.setItem(FK,JSON.stringify([...files]));
+  localStorage.setItem(BK,JSON.stringify(blanks));
+  localStorage.setItem(CK,JSON.stringify(conflicts));
+}
+function updateStats(){
+  document.getElementById('ts-total').textContent=Object.keys(db).length;
+  document.getElementById('ts-files').textContent=files.size;
+  document.getElementById('ts-blanks').textContent=blanks.length;
+  document.getElementById('ts-conflicts').textContent=Object.keys(conflicts).length;
+}
+function switchTab(id){
+  const ids=['search','autofill','conflicts','upload','analytics','database'];
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',ids[i]===id));
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='tab-'+id));
+  if(id==='analytics')renderAnalytics();
+  if(id==='database')renderTable();
+  if(id==='conflicts')renderConflicts();
+}
+
+// ===== SEARCH =====
+function doSearch(){
+  const q=document.getElementById('searchInput').value.trim();
+  const mode=document.getElementById('searchMode').value;
+  if(!q)return;
+  const qL=q.toLowerCase();
+  const isMID=mode==='mid'||(mode==='auto'&&/^[A-Z]{2}[A-Z0-9]{4,}/.test(q.toUpperCase())&&!q.includes(' '));
+  const results=[];
+  if(!isMID){
+    for(const [name,val] of Object.entries(db)){
+      const nL=name.toLowerCase();
+      if(nL===qL)results.unshift({name,mid:val.mid,source:val.source,type:'exact'});
+      else if(nL.includes(qL)||qL.includes(nL))results.push({name,mid:val.mid,source:val.source,type:'partial'});
+    }
+  }else{
+    for(const [name,val] of Object.entries(db)){
+      const mL=val.mid.toLowerCase();
+      if(mL===qL)results.unshift({name,mid:val.mid,source:val.source,type:'exact'});
+      else if(mL.includes(qL))results.push({name,mid:val.mid,source:val.source,type:'partial'});
+    }
+  }
+  // Add conflict badge if applicable
+  const c=document.getElementById('searchResults');
+  if(!results.length){c.innerHTML=`<div class="empty-state"><div class="big">&#128269;</div><h3>No results for "${q}"</h3><p>Try a partial name, or upload more manifests.</p></div>`;return;}
+  c.innerHTML=`<div class="result-grid">${results.slice(0,12).map(r=>{
+    const hasConflict=conflicts[r.name];
+    return`<div class="result-card ${r.type}">
+      <div class="rc-type ${r.type}">${r.type==='exact'?'&#10003; Exact match':'~ Partial match'}${hasConflict?' <span class="pill pill-yellow" style="font-size:9px">&#9888; MID CONFLICT</span>':''}</div>
+      ${!isMID?`<div class="rc-name">${hl(r.name,q)}</div><div class="rc-value">${r.mid} <button class="copy-btn" onclick="cp(${JSON.stringify(r.mid)},this)">copy MID</button></div>`
+      :`<div class="rc-name">MID: <span style="font-family:'Courier New',monospace;color:#10b981">${hl(r.mid,q)}</span></div><div class="rc-value" style="font-size:15px">${r.name} <button class="copy-btn" onclick="cp(${JSON.stringify(r.name)},this)">copy name</button></div>`}
+      ${hasConflict?`<div style="margin-top:8px;font-size:11px;color:var(--accent3)">&#9888; Multiple MIDs found: ${Object.keys(hasConflict).join(', ')} &mdash; verify manually</div>`:''}
+      <div class="rc-meta"><span class="rc-tag">&#128193; ${r.source}</span><span class="pill ${r.type==='exact'?'pill-green':'pill-yellow'}">${r.type}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+function hl(text,q){const i=text.toLowerCase().indexOf(q.toLowerCase());if(i<0)return text;return text.slice(0,i)+'<mark>'+text.slice(i,i+q.length)+'</mark>'+text.slice(i+q.length);}
+function cp(text,btn){navigator.clipboard.writeText(text).then(()=>{const o=btn.textContent;btn.textContent='copied!';btn.classList.add('ok');setTimeout(()=>{btn.textContent=o;btn.classList.remove('ok')},1500);});}
+function findSimilar(name){
+  const nL=name.toLowerCase();
+  for(const [k,v] of Object.entries(db)){const kL=k.toLowerCase();if(kL===nL||kL.includes(nL)||nL.includes(kL))return{name:k,mid:v.mid};}
+  const words=nL.split(/\s+/).filter(w=>w.length>3);
+  for(const [k,v] of Object.entries(db)){if(words.some(w=>k.toLowerCase().includes(w)))return{name:k,mid:v.mid};}
+  return null;
+}
+function renderAlerts(){
+  const bar=document.getElementById('alertsBar'),list=document.getElementById('alertsList');
+  if(!blanks.length){bar.classList.remove('show');return;}
+  bar.classList.add('show');
+  list.innerHTML=blanks.map(b=>{const f=findSimilar(b.name);return`<div class="alert-row"><div class="alert-name">${b.name} <span class="rc-tag" style="font-size:10px">${b.file}</span></div>${f?`<div class="alert-suggest">${f.mid} <span style="color:var(--muted);font-size:11px">via "${f.name}"</span><button class="copy-btn" onclick="cp(${JSON.stringify(f.mid)},this)">copy</button></div>`:`<div class="alert-none">Not found yet</div>`}</div>`;}).join('');
+}
+
+// ===== CONFLICT DETECTION =====
+function detectConflicts(rows,fileName){
+  // Build name->Set<mid> from this file
+  rows.forEach(row=>{
+    const name=(row['itemManufacturerName']||''  ).toString().trim();
+    const mid=(row['itemManufacturerMID']||'').toString().trim();
+    if(!name||!mid||mid==='nan')return;
+    const existingMID=db[name]?.mid;
+    if(existingMID&&existingMID!==mid){
+      if(!conflicts[name])conflicts[name]={};
+      conflicts[name][existingMID]=(conflicts[name][existingMID]||0)+1;
+      conflicts[name][mid]=(conflicts[name][mid]||0)+1;
+    }
+  });
+}
+function renderConflicts(){
+  const c=document.getElementById('conflictsList');
+  const entries=Object.entries(conflicts);
+  if(!entries.length){
+    c.innerHTML='<div class="empty-state"><div class="big">&#10003;</div><h3>No conflicts detected</h3><p>All manufacturer names have consistent MIDs across all loaded manifests. Upload more manifests to keep checking.</p></div>';
+    return;
+  }
+  c.innerHTML=entries.map(([name,midCounts])=>{
+    const mids=Object.keys(midCounts);
+    const maxCount=Math.max(...Object.values(midCounts));
+    const primaryMID=Object.entries(midCounts).sort((a,b)=>b[1]-a[1])[0][0];
+    return`<div class="conflict-card">
+      <div class="conflict-name">&#9888; ${name} <span class="pill pill-red">${mids.length} different MIDs</span></div>
+      <div class="conflict-mids">${mids.map(m=>`<span class="conflict-mid-tag ${m===primaryMID?'primary':'conflict'}">${m} <span style="opacity:.6;font-size:10px">(${midCounts[m]}x ${m===primaryMID?'most common':'conflict'})</span></span>`).join('')}</div>
+      <div style="margin-top:10px;font-size:12px;color:var(--muted)">Recommended: verify which MID is correct before using in any manifest. This entry will NOT be auto-filled.</div>
+    </div>`;
+  }).join('');
+}
+
+// ===== UPLOAD & LEARN =====
+function processFiles(fileList){
+  const log=document.getElementById('uploadLog');log.style.display='block';
+  Array.from(fileList).forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const sheet=wb.Sheets[wb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
+        let added=0,skipped=0,newBlanks=0,newConflicts=0;
+        detectConflicts(rows,file.name);
+        rows.forEach(row=>{
+          const name=(row['itemManufacturerName']||'').toString().trim();
+          const mid=(row['itemManufacturerMID']||'').toString().trim();
+          if(!name)return;
+          if(mid&&mid!=='nan'){
+            if(!db[name]){db[name]={mid,source:file.name,added:Date.now()};added++;}
+            else skipped++;
+            blanks=blanks.filter(b=>b.name.toLowerCase()!==name.toLowerCase());
+          }else{
+            if(!blanks.some(b=>b.name===name&&b.file===file.name)&&!db[name]){blanks.push({name,file:file.name});newBlanks++;}
+          }
+        });
+        const prevConflicts=Object.keys(conflicts).length;
+        newConflicts=Object.keys(conflicts).length-prevConflicts;
+        files.add(file.name);saveStorage();updateStats();renderAlerts();
+        const div=document.createElement('div');div.className='log-row log-ok';
+        div.innerHTML=`&#10003; <b>${file.name}</b> &mdash; +${added} new MIDs, ${skipped} already known${newBlanks?`, <span class="log-warn">+${newBlanks} blank MIDs flagged</span>`:''}${newConflicts>0?`, <span class="log-err">+${newConflicts} MID conflicts detected!</span>`:''}`;
+        log.prepend(div);
+      }catch(err){
+        const div=document.createElement('div');div.className='log-row log-err';
+        div.innerHTML=`&#10007; Error: ${file.name} &mdash; ${err.message}`;log.prepend(div);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+document.getElementById('fileInput').addEventListener('change',e=>{processFiles(e.target.files);e.target.value='';});
+const uz=document.getElementById('uploadZone');
+uz.addEventListener('dragover',e=>{e.preventDefault();uz.classList.add('drag');});
+uz.addEventListener('dragleave',()=>uz.classList.remove('drag'));
+uz.addEventListener('drop',e=>{e.preventDefault();uz.classList.remove('drag');processFiles(e.dataTransfer.files);});
+function exportDB(){const blob=new Blob([JSON.stringify(db,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='mid_database.json';a.click();}
+function clearDB(){if(!confirm('Reset to original 306 entries?'))return;db={...SEED};files=new Set(SEED_FILES);blanks=[...SEED_BLANKS];conflicts={};saveStorage();updateStats();renderAlerts();const log=document.getElementById('uploadLog');const div=document.createElement('div');div.className='log-row log-warn';div.textContent='Database reset.';log.style.display='block';log.prepend(div);}
+
+// ===== AUTO-FILL MANIFEST =====
+const afZone=document.getElementById('autofillZone');
+afZone.addEventListener('dragover',e=>{e.preventDefault();afZone.classList.add('drag');});
+afZone.addEventListener('dragleave',()=>afZone.classList.remove('drag'));
+afZone.addEventListener('drop',e=>{e.preventDefault();afZone.classList.remove('drag');handleAutofill(e.dataTransfer.files[0]);});
+document.getElementById('autofillInput').addEventListener('change',e=>{if(e.target.files[0])handleAutofill(e.target.files[0]);e.target.value='';});
+
+function handleAutofill(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const sheetName=wb.SheetNames[0];
+      const sheet=wb.Sheets[sheetName];
+      const rows=XLSX.utils.sheet_to_json(sheet,{defval:'',header:1});
+      if(!rows.length){alert('Empty file.');return;}
+
+      // Find header row and column indices
+      const headers=rows[0].map(h=>String(h||''  ).trim());
+      const midCol=headers.findIndex(h=>h==='itemManufacturerMID');
+      const nameCol=headers.findIndex(h=>h==='itemManufacturerName');
+
+      if(midCol<0&&nameCol<0){
+        alert('Could not find itemManufacturerMID or itemManufacturerName columns. Is this a valid manifest?');
+        return;
+      }
+
+      let filled=0,unfilled=0,conflictRows=0,unchanged=0,details=[];
+
+      // Process each data row
+      for(let i=1;i<rows.length;i++){
+        const row=rows[i];
+        if(!row||row.every(c=>c===''||c===null||c===undefined))continue;
+
+        const rawMID=midCol>=0?String(row[midCol]||''  ).trim():'';
+        const rawName=nameCol>=0?String(row[nameCol]||''  ).trim():'';
+        const hasMID=rawMID!==''&&rawMID!=='nan'&&rawMID!=='undefined';
+        const hasName=rawName!==''&&rawName!=='nan'&&rawName!=='undefined';
+
+        // Both present
+        if(hasMID&&hasName){unchanged++;continue;}
+
+        // MID missing, name present
+        if(!hasMID&&hasName){
+          const isConflict=!!conflicts[rawName];
+          if(isConflict){
+            conflictRows++;
+            details.push({row:i+1,type:'conflict',name:rawName,mid:rawMID,action:'NOT filled',reason:`MID conflict detected: ${Object.keys(conflicts[rawName]).join(' vs ')} — verify manually`});
+            continue;
+          }
+          // Exact match in DB
+          const dbEntry=db[rawName];
+          if(dbEntry){
+            if(midCol>=0)rows[i][midCol]=dbEntry.mid;
+            filled++;
+            details.push({row:i+1,type:'filled',name:rawName,mid:dbEntry.mid,action:`Filled MID from ${dbEntry.source}`,reason:'Exact name match'});
+          }else{
+            // Try case-insensitive exact
+            const ciKey=Object.keys(db).find(k=>k.toLowerCase()===rawName.toLowerCase());
+            if(ciKey){
+              if(midCol>=0)rows[i][midCol]=db[ciKey].mid;
+              filled++;
+              details.push({row:i+1,type:'filled',name:rawName,mid:db[ciKey].mid,action:`Filled MID (case-insensitive match: "${ciKey}")`,reason:'Case-insensitive name match'});
+            }else{
+              unfilled++;
+              details.push({row:i+1,type:'unfilled',name:rawName,mid:'',action:'NOT filled',reason:'Name not found in database — upload more manifests or enter manually'});
+            }
+          }
+        }
+
+        // Name missing, MID present
+        if(hasMID&&!hasName){
+          const dbEntry=Object.entries(db).find(([n,v])=>v.mid.toLowerCase()===rawMID.toLowerCase());
+          if(dbEntry){
+            if(nameCol>=0)rows[i][nameCol]=dbEntry[0];
+            filled++;
+            details.push({row:i+1,type:'filled',name:dbEntry[0],mid:rawMID,action:`Filled Name from ${dbEntry[1].source}`,reason:'Exact MID match'});
+          }else{
+            unfilled++;
+            details.push({row:i+1,type:'unfilled',name:'',mid:rawMID,action:'NOT filled',reason:'MID not found in database'});
+          }
+        }
+
+        // Both missing
+        if(!hasMID&&!hasName){
+          details.push({row:i+1,type:'unfilled',name:'',mid:'',action:'NOT filled',reason:'Both MID and Name are blank — cannot resolve without at least one identifier'});
+          unfilled++;
+        }
+      }
+
+      // Show summary
+      showAutofillSummary(file.name,filled,unfilled,conflictRows,unchanged,details,rows,headers,wb,sheetName);
+    }catch(err){alert('Error reading file: '+err.message);}
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function showAutofillSummary(fileName,filled,unfilled,conflictRows,unchanged,details,rows,headers,wb,sheetName){
+  const s=document.getElementById('autofillSummary');
+  s.style.display='block';
+
+  // Generate modified workbook for download
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  const newWb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(newWb,ws,sheetName);
+  const wbout=XLSX.write(newWb,{bookType:'xlsx',type:'array'});
+  const blob=new Blob([wbout],{type:'application/octet-stream'});
+  const url=URL.createObjectURL(blob);
+  const outName=fileName.replace(/(\.xlsx?)$/i,'_FILLED$1');
+
+  const problemRows=details.filter(d=>d.type==='unfilled'||d.type==='conflict');
+  const filledRows=details.filter(d=>d.type==='filled');
+
+  s.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
+      <div>
+        <div style="font-size:16px;font-weight:700">&#128203; ${fileName}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">Auto-fill complete &mdash; review results below before downloading</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a href="${url}" download="${outName}" class="btn btn-green">&#8595; Download Filled Manifest</a>
+        ${problemRows.length?`<button class="btn" onclick="document.getElementById('problems-section').scrollIntoView({behavior:'smooth'})">&#9888; ${problemRows.length} rows need attention</button>`:''}
+      </div>
+    </div>
+    <div class="summary-grid">
+      <div class="sum-card filled"><div class="sum-n filled">${filled}</div><div class="sum-l">Cells auto-filled</div></div>
+      <div class="sum-card unchanged"><div class="sum-n unchanged">${unchanged}</div><div class="sum-l">Rows already complete</div></div>
+      <div class="sum-card conflict-c"><div class="sum-n conflict-c">${conflictRows}</div><div class="sum-l">Conflict &mdash; not filled</div></div>
+      <div class="sum-card unfilled"><div class="sum-n unfilled">${unfilled}</div><div class="sum-l">Could not resolve</div></div>
+    </div>
+    ${filledRows.length?`
+    <div style="margin-bottom:16px">
+      <div class="chart-title" style="margin-bottom:10px">&#10003; Successfully filled (${filledRows.length} rows)</div>
+      <div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+        <table class="autofill-rows-table">
+          <thead><tr><th>Row</th><th>Manufacturer Name</th><th>MID Filled</th><th>Source</th></tr></thead>
+          <tbody>${filledRows.map(d=>`<tr class="row-filled"><td>${d.row}</td><td>${d.name}</td><td class="mid-cell">${d.mid}</td><td style="font-size:11px;color:var(--muted)">${d.action}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`:''}
+    ${problemRows.length?`
+    <div id="problems-section">
+      <div class="chart-title" style="margin-bottom:10px;color:var(--accent4)">&#9888; Rows requiring manual attention (${problemRows.length})</div>
+      <div style="max-height:300px;overflow-y:auto;border:1px solid #ef444430;border-radius:8px">
+        <table class="autofill-rows-table">
+          <thead><tr><th>Row</th><th>Name in File</th><th>MID in File</th><th>Status</th><th>Reason</th></tr></thead>
+          <tbody>${problemRows.map(d=>`<tr class="${d.type==='conflict'?'row-conflict':'row-unfilled'}">
+            <td>${d.row}</td>
+            <td>${d.name||'<span style="color:var(--muted)">blank</span>'}</td>
+            <td class="mid-cell">${d.mid||'<span style="color:var(--muted)">blank</span>'}</td>
+            <td><span class="status-badge ${d.type==='conflict'?'sb-conflict':'sb-unfilled'}">${d.type==='conflict'?'CONFLICT':'NOT FOUND'}</span></td>
+            <td><div class="reason-text">${d.reason}</div></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;padding:12px 16px;background:#ef444408;border:1px solid #ef444430;border-radius:8px;font-size:12px;color:var(--accent4);line-height:1.6">
+        &#9888; <b>Important:</b> The ${problemRows.length} rows above were NOT modified in the downloaded file. The blank cells remain blank. Please fill these manually after verifying the correct MID with your supplier or records.
+      </div>
+    </div>`:''}
+  `;
+}
+
+// ===== ANALYTICS =====
+function renderAnalytics(){
+  const entries=Object.entries(db),total=entries.length,fileMap={},cityMap={};
+  entries.forEach(([n,v])=>{fileMap[v.source]=(fileMap[v.source]||0)+1;const city=v.mid.replace(/^[A-Z]{2}/,'').replace(/[0-9]/g,'').slice(-3);if(city)cityMap[city]=(cityMap[city]||0)+1;});
+  const topFiles=Object.entries(fileMap).sort((a,b)=>b[1]-a[1]);
+  const topCities=Object.entries(cityMap).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const maxF=topFiles[0]?.[1]||1,maxC=topCities[0]?.[1]||1;
+  document.getElementById('analyticsCards').innerHTML=`<div class="stat-card"><div class="stat-n">${total}</div><div class="stat-l">Total manufacturers</div></div><div class="stat-card"><div class="stat-n">${files.size}</div><div class="stat-l">Manifest files</div></div><div class="stat-card"><div class="stat-n">${blanks.length}</div><div class="stat-l">Blank MIDs pending</div></div><div class="stat-card"><div class="stat-n">${Object.keys(conflicts).length}</div><div class="stat-l">MID conflicts</div></div><div class="stat-card"><div class="stat-n">${total-blanks.length}</div><div class="stat-l">Fully resolved</div></div>`;
+  document.getElementById('chartByFile').innerHTML=`<div class="chart-title">Manufacturers per file</div>`+topFiles.map(([f,n])=>`<div class="bar-row"><div class="bar-label" title="${f}">${f.replace('_Manifest','').replace('.xlsx','')}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(n/maxF*100)}%"><span class="bar-val">${n}</span></div></div></div>`).join('');
+  document.getElementById('chartByCity').innerHTML=`<div class="chart-title">Top city codes in MIDs</div>`+topCities.map(([c,n])=>`<div class="bar-row"><div class="bar-label">${c}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(n/maxC*100)}%;background:var(--accent2)"><span class="bar-val">${n}</span></div></div></div>`).join('');
+  document.getElementById('chartBlankMfrs').innerHTML=`<div class="chart-title">Blank MIDs requiring resolution</div>`+(blanks.length?blanks.map(b=>{const s=findSimilar(b.name);return`<div class="bar-row" style="align-items:flex-start;gap:14px;padding:8px 0;border-bottom:1px solid var(--border)"><div style="flex:1"><div style="font-size:13px;font-weight:600">${b.name}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${b.file}</div></div>${s?`<div style="font-family:'Courier New',monospace;font-size:13px;color:var(--accent2)">${s.mid} <span style="color:var(--muted);font-size:11px">~ "${s.name}"</span></div><span class="pill pill-yellow">Suggested</span>`:`<span class="pill pill-red">No match</span>`}</div>`;}).join(''):`<div style="color:var(--muted);font-size:14px;padding:12px 0">&#10003; No blank MIDs &mdash; all clear!</div>`);
+}
+
+// ===== TABLE =====
+function sortTable(key){if(sortKey===key)sortAsc=!sortAsc;else{sortKey=key;sortAsc=true;}renderTable();}
+function renderTable(){
+  const f=(document.getElementById('filterInput').value||''  ).toLowerCase();
+  let entries=Object.entries(db).filter(([n,v])=>!f||n.toLowerCase().includes(f)||v.mid.toLowerCase().includes(f)||v.source.toLowerCase().includes(f));
+  entries.sort((a,b)=>{let av=sortKey==='name'?a[0]:sortKey==='mid'?a[1].mid:sortKey==='source'?a[1].source:a[1].added;let bv=sortKey==='name'?b[0]:sortKey==='mid'?b[1].mid:sortKey==='source'?b[1].source:b[1].added;return sortAsc?(av<bv?-1:av>bv?1:0):(av>bv?-1:av<bv?1:0);});
+  document.getElementById('rowCount').textContent=`${entries.length} of ${Object.keys(db).length}`;
+  document.getElementById('tableBody').innerHTML=entries.map(([name,val])=>{
+    const hasConflict=!!conflicts[name];
+    return`<tr onclick="document.getElementById('searchInput').value=${JSON.stringify(name)};switchTab('search');doSearch()">
+      <td>${f?hl(name,f):name}${hasConflict?' <span class="pill pill-yellow" style="font-size:9px">&#9888; conflict</span>':''}</td>
+      <td class="mid-cell">${f?hl(val.mid,f):val.mid}</td>
+      <td class="src-cell">${val.source}</td>
+      <td class="time-cell">${val.added>1700000400?new Date(val.added).toLocaleDateString():'Pre-loaded'}</td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('searchInput').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+loadStorage();updateStats();renderAlerts();
+</script>
+</body>
+</html>
