@@ -436,18 +436,49 @@ afZone.addEventListener('dragleave',()=>afZone.classList.remove('drag'));
 afZone.addEventListener('drop',e=>{e.preventDefault();afZone.classList.remove('drag');handleAutofill(e.dataTransfer.files[0]);});
 document.getElementById('autofillInput').addEventListener('change',e=>{if(e.target.files[0])handleAutofill(e.target.files[0]);e.target.value='';});
 
+// Convert 0-based col index to Excel column letter (A, B, ... Z, AA, AB ...)
+function colLetter(idx){
+  let s='',n=idx+1;
+  while(n>0){s=String.fromCharCode(65+((n-1)%26))+s;n=Math.floor((n-1)/26);}
+  return s;
+}
+// Write a value into a sheet cell, creating the cell if it doesn't exist yet
+// NEVER touches any other property — only sets .v and .t so formatting is preserved
+function patchCell(sheet,colIdx,rowIdx,value){
+  const addr=colLetter(colIdx)+rowIdx;
+  if(!sheet[addr]){
+    // Cell doesn't exist at all (was truly empty) — create minimal cell object
+    sheet[addr]={t:'s',v:value};
+    // Extend sheet range if needed
+    const ref=sheet['!ref']||'A1';
+    const range=XLSX.utils.decode_range(ref);
+    const c=colIdx, r=rowIdx-1;
+    if(c>range.e.c)range.e.c=c;
+    if(r>range.e.r)range.e.r=r;
+    sheet['!ref']=XLSX.utils.encode_range(range);
+  }else{
+    // Cell exists — only update value and type, leave all style/formula info untouched
+    sheet[addr].v=value;
+    sheet[addr].t='s';
+    // If it had a formula, remove it so the filled value shows
+    delete sheet[addr].f;
+  }
+}
+
 function handleAutofill(file){
   const reader=new FileReader();
   reader.onload=e=>{
     try{
-      const wb=XLSX.read(e.target.result,{type:'array'});
+      // Read with cellStyles:true so ALL formatting is preserved in the workbook object
+      const wb=XLSX.read(e.target.result,{type:'array',cellStyles:true,cellNF:true,cellDates:true});
       const sheetName=wb.SheetNames[0];
       const sheet=wb.Sheets[sheetName];
+
+      // Read data as array-of-arrays just to find headers and scan values
       const rows=XLSX.utils.sheet_to_json(sheet,{defval:'',header:1});
       if(!rows.length){alert('Empty file.');return;}
 
-      // Find header row and column indices
-      const headers=rows[0].map(h=>String(h||''  ).trim());
+      const headers=rows[0].map(h=>String(h||'').trim());
       const midCol=headers.findIndex(h=>h==='itemManufacturerMID');
       const nameCol=headers.findIndex(h=>h==='itemManufacturerName');
 
@@ -458,83 +489,76 @@ function handleAutofill(file){
 
       let filled=0,unfilled=0,conflictRows=0,unchanged=0,details=[];
 
-      // Process each data row
+      // i=0 is header row (row 1 in Excel), data starts at i=1 (row 2)
       for(let i=1;i<rows.length;i++){
         const row=rows[i];
+        const excelRow=i+1; // 1-based Excel row number
         if(!row||row.every(c=>c===''||c===null||c===undefined))continue;
 
-        const rawMID=midCol>=0?String(row[midCol]||''  ).trim():'';
-        const rawName=nameCol>=0?String(row[nameCol]||''  ).trim():'';
+        const rawMID=midCol>=0?String(row[midCol]||'').trim():'';
+        const rawName=nameCol>=0?String(row[nameCol]||'').trim():'';
         const hasMID=rawMID!==''&&rawMID!=='nan'&&rawMID!=='undefined';
         const hasName=rawName!==''&&rawName!=='nan'&&rawName!=='undefined';
 
-        // Both present
         if(hasMID&&hasName){unchanged++;continue;}
 
-        // MID missing, name present
         if(!hasMID&&hasName){
           const isConflict=!!conflicts[rawName];
           if(isConflict){
             conflictRows++;
-            details.push({row:i+1,type:'conflict',name:rawName,mid:rawMID,action:'NOT filled',reason:`MID conflict detected: ${Object.keys(conflicts[rawName]).join(' vs ')} — verify manually`});
+            details.push({row:excelRow,type:'conflict',name:rawName,mid:'',action:'NOT filled',reason:`MID conflict: ${Object.keys(conflicts[rawName]).join(' vs ')} — verify manually`});
             continue;
           }
-          // Exact match in DB
           const dbEntry=db[rawName];
           if(dbEntry){
-            if(midCol>=0)rows[i][midCol]=dbEntry.mid;
+            patchCell(sheet,midCol,excelRow,dbEntry.mid);
             filled++;
-            details.push({row:i+1,type:'filled',name:rawName,mid:dbEntry.mid,action:`Filled MID from ${dbEntry.source}`,reason:'Exact name match'});
+            details.push({row:excelRow,type:'filled',name:rawName,mid:dbEntry.mid,action:`Filled MID from ${dbEntry.source}`,reason:'Exact name match'});
           }else{
-            // Try case-insensitive exact
             const ciKey=Object.keys(db).find(k=>k.toLowerCase()===rawName.toLowerCase());
             if(ciKey){
-              if(midCol>=0)rows[i][midCol]=db[ciKey].mid;
+              patchCell(sheet,midCol,excelRow,db[ciKey].mid);
               filled++;
-              details.push({row:i+1,type:'filled',name:rawName,mid:db[ciKey].mid,action:`Filled MID (case-insensitive match: "${ciKey}")`,reason:'Case-insensitive name match'});
+              details.push({row:excelRow,type:'filled',name:rawName,mid:db[ciKey].mid,action:`Filled MID (case-insensitive: "${ciKey}")`,reason:'Case-insensitive name match'});
             }else{
               unfilled++;
-              details.push({row:i+1,type:'unfilled',name:rawName,mid:'',action:'NOT filled',reason:'Name not found in database — upload more manifests or enter manually'});
+              details.push({row:excelRow,type:'unfilled',name:rawName,mid:'',action:'NOT filled',reason:'Name not found in database'});
             }
           }
         }
 
-        // Name missing, MID present
         if(hasMID&&!hasName){
           const dbEntry=Object.entries(db).find(([n,v])=>v.mid.toLowerCase()===rawMID.toLowerCase());
           if(dbEntry){
-            if(nameCol>=0)rows[i][nameCol]=dbEntry[0];
+            patchCell(sheet,nameCol,excelRow,dbEntry[0]);
             filled++;
-            details.push({row:i+1,type:'filled',name:dbEntry[0],mid:rawMID,action:`Filled Name from ${dbEntry[1].source}`,reason:'Exact MID match'});
+            details.push({row:excelRow,type:'filled',name:dbEntry[0],mid:rawMID,action:`Filled Name from ${dbEntry[1].source}`,reason:'Exact MID match'});
           }else{
             unfilled++;
-            details.push({row:i+1,type:'unfilled',name:'',mid:rawMID,action:'NOT filled',reason:'MID not found in database'});
+            details.push({row:excelRow,type:'unfilled',name:'',mid:rawMID,action:'NOT filled',reason:'MID not found in database'});
           }
         }
 
-        // Both missing
         if(!hasMID&&!hasName){
-          details.push({row:i+1,type:'unfilled',name:'',mid:'',action:'NOT filled',reason:'Both MID and Name are blank — cannot resolve without at least one identifier'});
           unfilled++;
+          details.push({row:excelRow,type:'unfilled',name:'',mid:'',action:'NOT filled',reason:'Both MID and Name blank — need at least one to resolve'});
         }
       }
 
-      // Show summary
-      showAutofillSummary(file.name,filled,unfilled,conflictRows,unchanged,details,rows,headers,wb,sheetName);
+      // Write the ORIGINAL workbook back — only the cells we patched above are changed
+      // Everything else (colours, fonts, column widths, merged cells) is untouched
+      showAutofillSummary(file.name,filled,unfilled,conflictRows,unchanged,details,wb,sheetName);
     }catch(err){alert('Error reading file: '+err.message);}
   };
   reader.readAsArrayBuffer(file);
 }
 
-function showAutofillSummary(fileName,filled,unfilled,conflictRows,unchanged,details,rows,headers,wb,sheetName){
+function showAutofillSummary(fileName,filled,unfilled,conflictRows,unchanged,details,wb,sheetName){
   const s=document.getElementById('autofillSummary');
   s.style.display='block';
 
-  // Generate modified workbook for download
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  const newWb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(newWb,ws,sheetName);
-  const wbout=XLSX.write(newWb,{bookType:'xlsx',type:'array'});
+  // Write the original workbook — formatting fully preserved, only patched cells changed
+  const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array',cellStyles:true});
   const blob=new Blob([wbout],{type:'application/octet-stream'});
   const url=URL.createObjectURL(blob);
   const outName=fileName.replace(/(\.xlsx?)$/i,'_FILLED$1');
