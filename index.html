@@ -391,8 +391,14 @@ function processFiles(fileList){
     reader.onload=e=>{
       try{
         const wb=XLSX.read(e.target.result,{type:'array'});
-        const sheet=wb.Sheets[wb.SheetNames[0]];
-        const rows=XLSX.utils.sheet_to_json(sheet,{defval:''});
+        // Scan all sheets for the one with manifest columns
+        let sheet=null,rows=null;
+        for(const sn of wb.SheetNames){
+          const s=wb.Sheets[sn];
+          const r=XLSX.utils.sheet_to_json(s,{defval:''});
+          if(r.length&&r[0]&&('itemManufacturerMID' in r[0]||'itemManufacturerName' in r[0])){sheet=s;rows=r;break;}
+        }
+        if(!sheet){sheet=wb.Sheets[wb.SheetNames[0]];rows=XLSX.utils.sheet_to_json(sheet,{defval:''});}
         let added=0,skipped=0,newBlanks=0,newConflicts=0;
         detectConflicts(rows,file.name);
         rows.forEach(row=>{
@@ -490,19 +496,24 @@ function handleAutofill(file){
   reader.onload=e=>{
     try{
       const wb=XLSX.read(e.target.result,{type:'array',cellStyles:true,cellNF:true,cellDates:true});
-      const sheetName=wb.SheetNames[0];
-      const sheet=wb.Sheets[sheetName];
-      const rows=XLSX.utils.sheet_to_json(sheet,{defval:'',header:1});
-      if(!rows.length){alert('Empty file.');return;}
 
-      const headers=rows[0].map(h=>String(h||'').trim());
-      const midCol=headers.findIndex(h=>h==='itemManufacturerMID');
-      const nameCol=headers.findIndex(h=>h==='itemManufacturerName');
-
-      if(midCol<0&&nameCol<0){
-        alert('Could not find itemManufacturerMID or itemManufacturerName columns.\nIs this a valid manifest file?');
+      // Scan EVERY sheet to find the one containing itemManufacturerMID or itemManufacturerName
+      // Never assume SheetNames[0] — manifests use different tab names (TEST FILE, Manifest Details, etc.)
+      let sheetName=null,sheet=null,rows=null,midCol=-1,nameCol=-1;
+      for(const sn of wb.SheetNames){
+        const s=wb.Sheets[sn];
+        const r=XLSX.utils.sheet_to_json(s,{defval:'',header:1});
+        if(!r.length)continue;
+        const hdrs=r[0].map(h=>String(h||'').trim());
+        const mc=hdrs.findIndex(h=>h==='itemManufacturerMID');
+        const nc=hdrs.findIndex(h=>h==='itemManufacturerName');
+        if(mc>=0||nc>=0){sheetName=sn;sheet=s;rows=r;midCol=mc;nameCol=nc;break;}
+      }
+      if(!sheetName){
+        alert('Could not find itemManufacturerMID or itemManufacturerName in any sheet.\nSheets in this file: '+wb.SheetNames.join(', '));
         return;
       }
+      if(!rows.length){alert('Sheet "'+sheetName+'" is empty.');return;}
 
       // Skip instruction rows (rows like "Mandatory", "Min: 1 / Max: 70", etc.)
       let dataStartIdx=1;
