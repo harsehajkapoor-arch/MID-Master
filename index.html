@@ -497,126 +497,149 @@ function handleAutofill(file){
     try{
       const wb=XLSX.read(e.target.result,{type:'array',cellStyles:true,cellNF:true,cellDates:true});
 
-      // Scan EVERY sheet to find the one containing itemManufacturerMID or itemManufacturerName
-      // Never assume SheetNames[0] — manifests use different tab names (TEST FILE, Manifest Details, etc.)
-      let sheetName=null,sheet=null,rows=null,midCol=-1,nameCol=-1;
+      // ── Find the right sheet ──
+      // Scan every sheet for itemManufacturerMID or itemManufacturerName
+      let sheetName=null, sheet=null;
       for(const sn of wb.SheetNames){
         const s=wb.Sheets[sn];
-        const r=XLSX.utils.sheet_to_json(s,{defval:'',header:1});
-        if(!r.length)continue;
-        const hdrs=r[0].map(h=>String(h||'').trim());
-        const mc=hdrs.findIndex(h=>h==='itemManufacturerMID');
-        const nc=hdrs.findIndex(h=>h==='itemManufacturerName');
-        if(mc>=0||nc>=0){sheetName=sn;sheet=s;rows=r;midCol=mc;nameCol=nc;break;}
+        if(!s['!ref'])continue;
+        const range=XLSX.utils.decode_range(s['!ref']);
+        // Scan first 10 rows for header cells
+        for(let r=range.s.r;r<=Math.min(range.s.r+9,range.e.r);r++){
+          for(let c=range.s.c;c<=range.e.c;c++){
+            const addr=XLSX.utils.encode_cell({r,c});
+            const v=s[addr]?String(s[addr].v||'').trim():'';
+            if(v==='itemManufacturerMID'||v==='itemManufacturerName'){
+              sheetName=sn; sheet=s; break;
+            }
+          }
+          if(sheetName)break;
+        }
+        if(sheetName)break;
       }
       if(!sheetName){
-        alert('Could not find itemManufacturerMID or itemManufacturerName in any sheet.\nSheets in this file: '+wb.SheetNames.join(', '));
+        alert('Could not find itemManufacturerMID or itemManufacturerName in any sheet.\nSheets: '+wb.SheetNames.join(', '));
         return;
       }
-      if(!rows.length){alert('Sheet "'+sheetName+'" is empty.');return;}
 
-      // Skip instruction rows (rows like "Mandatory", "Min: 1 / Max: 70", etc.)
-      let dataStartIdx=1;
-      for(let i=1;i<=4&&i<rows.length;i++){
-        const r=rows[i];
-        const a=String(r[midCol]||'').trim();
-        const b=String(r[nameCol]||'').trim();
-        if(/mandatory|conditional|min:|max:|alphanumeric|if mid/i.test(a+' '+b)) dataStartIdx=i+1;
+      // ── Find the EXACT Excel row and column addresses for both headers ──
+      // We do this directly on the sheet object so we get the true column letter.
+      // This avoids ANY array-index vs Excel-column mismatch.
+      const sheetRange=XLSX.utils.decode_range(sheet['!ref']);
+      let headerRow=-1, midColIdx=-1, nameColIdx=-1;
+
+      for(let r=sheetRange.s.r;r<=Math.min(sheetRange.s.r+9,sheetRange.e.r);r++){
+        for(let c=sheetRange.s.c;c<=sheetRange.e.c;c++){
+          const addr=XLSX.utils.encode_cell({r,c});
+          const v=sheet[addr]?String(sheet[addr].v||'').trim():'';
+          if(v==='itemManufacturerMID')  {headerRow=r; midColIdx=c;}
+          if(v==='itemManufacturerName') {headerRow=r; nameColIdx=c;}
+        }
+        if(midColIdx>=0&&nameColIdx>=0) break;
+      }
+
+      if(midColIdx<0&&nameColIdx<0){
+        alert('Headers found in sheet but column indices could not be resolved.');
+        return;
+      }
+
+      // ── Skip instruction rows (Mandatory / Min: / Max: etc.) ──
+      let dataStartRow=headerRow+1;
+      for(let r=headerRow+1;r<=Math.min(headerRow+4,sheetRange.e.r);r++){
+        const mAddr=midColIdx>=0?XLSX.utils.encode_cell({r,c:midColIdx}):'';
+        const nAddr=nameColIdx>=0?XLSX.utils.encode_cell({r,c:nameColIdx}):'';
+        const mv=mAddr&&sheet[mAddr]?String(sheet[mAddr].v||'').trim():'';
+        const nv=nAddr&&sheet[nAddr]?String(sheet[nAddr].v||'').trim():'';
+        if(/mandatory|conditional|min:|max:|alphanumeric|if mid/i.test(mv+' '+nv)) dataStartRow=r+1;
       }
 
       let filled=0,swapped=0,unfilled=0,conflictRows=0,unchanged=0,details=[];
 
-      for(let i=dataStartIdx;i<rows.length;i++){
-        const row=rows[i];
-        const excelRow=i+1;
-        if(!row||row.every(c=>c===''||c===null||c===undefined))continue;
+      // ── Process every data row ──
+      for(let r=dataStartRow;r<=sheetRange.e.r;r++){
 
-        // Read raw cell values, treat junk strings as empty
-        const junk=v=>(!v||v==='nan'||v==='undefined'||v==='null');
-        const rawA=midCol>=0?String(row[midCol]||'').trim():'';
-        const rawB=nameCol>=0?String(row[nameCol]||'').trim():'';
-        const cellMID=junk(rawA)?'':rawA;   // what's currently in the MID column
-        const cellName=junk(rawB)?'':rawB;  // what's currently in the Name column
+        // Read the exact cell values using true Excel addresses
+        const midAddr = midColIdx>=0  ? XLSX.utils.encode_cell({r, c:midColIdx})  : null;
+        const nameAddr= nameColIdx>=0 ? XLSX.utils.encode_cell({r, c:nameColIdx}) : null;
 
-        // ── STEP 1: Ask the DB what each cell value actually is ──
-        // Each value gets checked against BOTH the MID index and the Name index.
-        // The DB answer is the ground truth — no pattern matching, no guessing.
-        const midCellAsMID  = cellMID  ? dbLookupByMID(cellMID)   : null; // is MID-col value a known MID?
-        const midCellAsName = cellMID  ? dbLookupByName(cellMID)  : null; // is MID-col value a known Name?
-        const nameCellAsMID = cellName ? dbLookupByMID(cellName)  : null; // is Name-col value a known MID?
-        const nameCellAsName= cellName ? dbLookupByName(cellName) : null; // is Name-col value a known Name?
+        const rawMID = midAddr  && sheet[midAddr]  ? String(sheet[midAddr].v  ||'').trim() : '';
+        const rawName= nameAddr && sheet[nameAddr] ? String(sheet[nameAddr].v ||'').trim() : '';
 
-        // ── STEP 2: Decide what the correct MID and Name are for this row ──
-        let correctMID='', correctName='', source='', action='', needsChange=false;
+        // Skip fully empty rows
+        if(!rawMID&&!rawName){
+          // check a few other cols to see if row has any data at all
+          let hasData=false;
+          for(let c=sheetRange.s.c;c<=sheetRange.e.c;c++){
+            const a=XLSX.utils.encode_cell({r,c});
+            if(sheet[a]&&sheet[a].v!==undefined&&sheet[a].v!==''){hasData=true;break;}
+          }
+          if(!hasData) continue;
+        }
 
-        // Collect what we know from each cell
-        if(midCellAsMID)  { correctMID=midCellAsMID.mid;   correctName=correctName||midCellAsMID.name;  source=midCellAsMID.source; }
-        if(midCellAsName) { correctName=midCellAsName.name; correctMID=correctMID||midCellAsName.mid;    source=midCellAsName.source; }
-        if(nameCellAsMID) { correctMID=nameCellAsMID.mid;  correctName=correctName||nameCellAsMID.name; source=nameCellAsMID.source; }
-        if(nameCellAsName){ correctName=nameCellAsName.name;correctMID=correctMID||nameCellAsName.mid;   source=nameCellAsName.source; }
+        const junk=v=>!v||v==='nan'||v==='undefined'||v==='null';
+        const cellMID = junk(rawMID)  ? '' : rawMID;
+        const cellName= junk(rawName) ? '' : rawName;
 
-        // If DB gave us nothing for either cell — nothing is recognisable, skip
+        // ── Ask the DB what each cell value actually is ──
+        const midCellAsMID  = cellMID  ? dbLookupByMID(cellMID)   : null;
+        const midCellAsName = cellMID  ? dbLookupByName(cellMID)  : null;
+        const nameCellAsMID = cellName ? dbLookupByMID(cellName)  : null;
+        const nameCellAsName= cellName ? dbLookupByName(cellName) : null;
+
+        // ── Determine the correct MID and Name from DB lookups ──
+        let correctMID='', correctName='', source='';
+        if(midCellAsMID)  {correctMID=midCellAsMID.mid;  correctName=correctName||midCellAsMID.name;  source=midCellAsMID.source;}
+        if(midCellAsName) {correctName=midCellAsName.name;correctMID=correctMID||midCellAsName.mid;   source=midCellAsName.source;}
+        if(nameCellAsMID) {correctMID=nameCellAsMID.mid; correctName=correctName||nameCellAsMID.name; source=nameCellAsMID.source;}
+        if(nameCellAsName){correctName=nameCellAsName.name;correctMID=correctMID||nameCellAsName.mid; source=nameCellAsName.source;}
+
+        // Nothing recognised in DB — flag and skip
         if(!correctMID&&!correctName){
-          if(!cellMID&&!cellName){
+          if(cellMID||cellName){
             unfilled++;
-            details.push({row:excelRow,type:'unfilled',name:'',mid:'',
-              action:'NOT filled',reason:'Both cells are blank — need at least one value to look up'});
-          }else{
-            unfilled++;
-            details.push({row:excelRow,type:'unfilled',
-              name:cellName||'',mid:cellMID||'',
-              action:'NOT filled',
-              reason:`"${cellMID||cellName}" not found in database — upload more manifests or fill manually`});
+            details.push({row:r+1,type:'unfilled',name:cellName,mid:cellMID,
+              action:'NOT touched',
+              reason:`"${cellMID||cellName}" not in database — upload more manifests or fill manually`});
           }
           continue;
         }
 
-        // Check for MID conflict
+        // Conflict check
         if(correctName&&conflicts[correctName]){
           conflictRows++;
-          details.push({row:excelRow,type:'conflict',name:correctName,mid:correctMID,
+          details.push({row:r+1,type:'conflict',name:correctName,mid:correctMID,
             action:'NOT touched',
-            reason:`"${correctName}" has a MID conflict in the database: ${Object.keys(conflicts[correctName]).join(' vs ')} — verify manually`});
+            reason:`"${correctName}" has a MID conflict: ${Object.keys(conflicts[correctName]).join(' vs ')} — verify manually`});
           continue;
         }
 
-        // ── STEP 3: Write the correct values into their correct columns (only if changed) ──
+        // ── Write only what changed, directly to the exact cell address ──
         const midChanged  = correctMID  && correctMID!==cellMID;
         const nameChanged = correctName && correctName!==cellName;
 
-        if(!midChanged&&!nameChanged){
-          unchanged++;
-          continue;
-        }
+        if(!midChanged&&!nameChanged){unchanged++;continue;}
 
-        // Build description of what's changing
         const changes=[];
-        if(midChanged){
-          patchCell(sheet,midCol,excelRow,correctMID);
-          if(cellMID&&cellMID!==correctMID)
-            changes.push(`MID col: "${cellMID}" → "${correctMID}"`);
-          else
-            changes.push(`MID col: filled "${correctMID}"`);
+        if(midChanged&&midAddr){
+          // Patch directly using the true Excel address — no colLetter, no index math
+          if(!sheet[midAddr]) sheet[midAddr]={t:'s'};
+          sheet[midAddr].v=correctMID; sheet[midAddr].t='s'; delete sheet[midAddr].f;
+          changes.push(`MID: "${cellMID||'blank'}" → "${correctMID}"`);
         }
-        if(nameChanged){
-          patchCell(sheet,nameCol,excelRow,correctName);
-          if(cellName&&cellName!==correctName)
-            changes.push(`Name col: "${cellName}" → "${correctName}"`);
-          else
-            changes.push(`Name col: filled "${correctName}"`);
+        if(nameChanged&&nameAddr){
+          if(!sheet[nameAddr]) sheet[nameAddr]={t:'s'};
+          sheet[nameAddr].v=correctName; sheet[nameAddr].t='s'; delete sheet[nameAddr].f;
+          changes.push(`Name: "${cellName||'blank'}" → "${correctName}"`);
         }
 
-        // Was this a swap (value in wrong column) or just a fill (blank cell)?
-        const wasSwap=(cellMID&&midCellAsName)||(cellName&&nameCellAsMID)||
-                      (cellMID&&!midCellAsMID&&midCellAsName)||(cellName&&!nameCellAsName&&nameCellAsMID);
+        const wasSwap=(cellMID&&midCellAsName)||(cellName&&nameCellAsMID);
+        if(wasSwap) swapped++; else filled++;
 
-        if(wasSwap){ swapped++; }else{ filled++; }
-
-        details.push({row:excelRow,
+        details.push({row:r+1,
           type:wasSwap?'swapped':'filled',
-          name:correctName,mid:correctMID,
-          action:changes.join(' | ')+` (source: ${source})`,
-          reason:wasSwap?'Value(s) were in wrong column — corrected using database':'Blank cell(s) filled using database'});
+          name:correctName, mid:correctMID,
+          action:changes.join(' | ')+` (from: ${source})`,
+          reason:wasSwap?'Value(s) were in wrong column — corrected':'Blank cell(s) filled from database'});
       }
 
       showAutofillSummary(file.name,filled,swapped,unfilled,conflictRows,unchanged,details,wb,sheetName);
