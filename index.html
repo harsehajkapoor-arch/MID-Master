@@ -522,11 +522,10 @@ function handleAutofill(file){
         return;
       }
 
-      // ── Find the EXACT Excel row and column addresses for both headers ──
-      // We do this directly on the sheet object so we get the true column letter.
-      // This avoids ANY array-index vs Excel-column mismatch.
+      // ── Find the EXACT Excel column indices for all relevant headers ──
+      // itemManufacturerMID, itemManufacturerName, itemSellerName (CT — same entity as Name)
       const sheetRange=XLSX.utils.decode_range(sheet['!ref']);
-      let headerRow=-1, midColIdx=-1, nameColIdx=-1;
+      let headerRow=-1, midColIdx=-1, nameColIdx=-1, sellerColIdx=-1;
 
       for(let r=sheetRange.s.r;r<=Math.min(sheetRange.s.r+9,sheetRange.e.r);r++){
         for(let c=sheetRange.s.c;c<=sheetRange.e.c;c++){
@@ -534,8 +533,9 @@ function handleAutofill(file){
           const v=sheet[addr]?String(sheet[addr].v||'').trim():'';
           if(v==='itemManufacturerMID')  {headerRow=r; midColIdx=c;}
           if(v==='itemManufacturerName') {headerRow=r; nameColIdx=c;}
+          if(v==='itemSellerName')       {headerRow=r; sellerColIdx=c;}
         }
-        if(midColIdx>=0&&nameColIdx>=0) break;
+        if(midColIdx>=0||nameColIdx>=0) break;
       }
 
       if(midColIdx<0&&nameColIdx<0){
@@ -558,16 +558,17 @@ function handleAutofill(file){
       // ── Process every data row ──
       for(let r=dataStartRow;r<=sheetRange.e.r;r++){
 
-        // Read the exact cell values using true Excel addresses
-        const midAddr = midColIdx>=0  ? XLSX.utils.encode_cell({r, c:midColIdx})  : null;
-        const nameAddr= nameColIdx>=0 ? XLSX.utils.encode_cell({r, c:nameColIdx}) : null;
+        // Read exact cell values via true Excel addresses — zero index arithmetic
+        const midAddr   = midColIdx>=0    ? XLSX.utils.encode_cell({r,c:midColIdx})    : null;
+        const nameAddr  = nameColIdx>=0   ? XLSX.utils.encode_cell({r,c:nameColIdx})   : null;
+        const sellerAddr= sellerColIdx>=0 ? XLSX.utils.encode_cell({r,c:sellerColIdx}) : null;
 
-        const rawMID = midAddr  && sheet[midAddr]  ? String(sheet[midAddr].v  ||'').trim() : '';
-        const rawName= nameAddr && sheet[nameAddr] ? String(sheet[nameAddr].v ||'').trim() : '';
+        const rawMID    = midAddr    && sheet[midAddr]    ? String(sheet[midAddr].v   ||'').trim() : '';
+        const rawName   = nameAddr   && sheet[nameAddr]   ? String(sheet[nameAddr].v  ||'').trim() : '';
+        const rawSeller = sellerAddr && sheet[sellerAddr] ? String(sheet[sellerAddr].v||'').trim() : '';
 
         // Skip fully empty rows
-        if(!rawMID&&!rawName){
-          // check a few other cols to see if row has any data at all
+        if(!rawMID&&!rawName&&!rawSeller){
           let hasData=false;
           for(let c=sheetRange.s.c;c<=sheetRange.e.c;c++){
             const a=XLSX.utils.encode_cell({r,c});
@@ -577,29 +578,42 @@ function handleAutofill(file){
         }
 
         const junk=v=>!v||v==='nan'||v==='undefined'||v==='null';
-        const cellMID = junk(rawMID)  ? '' : rawMID;
-        const cellName= junk(rawName) ? '' : rawName;
+        const cellMID   = junk(rawMID)    ? '' : rawMID;
+        const cellName  = junk(rawName)   ? '' : rawName;
+        const cellSeller= junk(rawSeller) ? '' : rawSeller;
 
         // ── Ask the DB what each cell value actually is ──
-        const midCellAsMID  = cellMID  ? dbLookupByMID(cellMID)   : null;
-        const midCellAsName = cellMID  ? dbLookupByName(cellMID)  : null;
-        const nameCellAsMID = cellName ? dbLookupByMID(cellName)  : null;
-        const nameCellAsName= cellName ? dbLookupByName(cellName) : null;
+        // MID column: could be a real MID or a name placed in wrong column
+        const midCellAsMID  = cellMID   ? dbLookupByMID(cellMID)   : null;
+        const midCellAsName = cellMID   ? dbLookupByName(cellMID)  : null;
+        // Name column: could be a real name or a MID placed in wrong column
+        const nameCellAsMID = cellName  ? dbLookupByMID(cellName)  : null;
+        const nameCellAsName= cellName  ? dbLookupByName(cellName) : null;
+        // Seller column (itemSellerName): always treated as a name — never as a MID
+        // Only consulted when Name column didn't already resolve the MID
+        const sellerAsName  = (cellSeller&&!cellName) ? dbLookupByName(cellSeller) : null;
 
-        // ── Determine the correct MID and Name from DB lookups ──
-        let correctMID='', correctName='', source='';
+        // ── Determine correct MID and Name from all lookups ──
+        let correctMID='', correctName='', source='', sellerUsed=false;
         if(midCellAsMID)  {correctMID=midCellAsMID.mid;  correctName=correctName||midCellAsMID.name;  source=midCellAsMID.source;}
         if(midCellAsName) {correctName=midCellAsName.name;correctMID=correctMID||midCellAsName.mid;   source=midCellAsName.source;}
         if(nameCellAsMID) {correctMID=nameCellAsMID.mid; correctName=correctName||nameCellAsMID.name; source=nameCellAsMID.source;}
         if(nameCellAsName){correctName=nameCellAsName.name;correctMID=correctMID||nameCellAsName.mid; source=nameCellAsName.source;}
+        // itemSellerName fallback: only fills MID when it's still unknown after above lookups
+        if(!correctMID&&sellerAsName){
+          correctMID=sellerAsName.mid;
+          correctName=correctName||sellerAsName.name;
+          source=sellerAsName.source;
+          sellerUsed=true;
+        }
 
-        // Nothing recognised in DB — flag and skip
+        // Nothing in DB — flag and skip, never touch the row
         if(!correctMID&&!correctName){
-          if(cellMID||cellName){
+          if(cellMID||cellName||cellSeller){
             unfilled++;
-            details.push({row:r+1,type:'unfilled',name:cellName,mid:cellMID,
+            details.push({row:r+1,type:'unfilled',name:cellName||cellSeller,mid:cellMID,
               action:'NOT touched',
-              reason:`"${cellMID||cellName}" not in database — upload more manifests or fill manually`});
+              reason:`"${cellMID||cellName||cellSeller}" not found in database — upload more manifests or fill manually`});
           }
           continue;
         }
@@ -635,11 +649,15 @@ function handleAutofill(file){
         const wasSwap=(cellMID&&midCellAsName)||(cellName&&nameCellAsMID);
         if(wasSwap) swapped++; else filled++;
 
+        const srcNote=sellerUsed
+          ?`MID via itemSellerName "${cellSeller}" — from: ${source}`
+          :`from: ${source}`;
         details.push({row:r+1,
           type:wasSwap?'swapped':'filled',
           name:correctName, mid:correctMID,
-          action:changes.join(' | ')+` (from: ${source})`,
-          reason:wasSwap?'Value(s) were in wrong column — corrected':'Blank cell(s) filled from database'});
+          action:changes.join(' | ')+` (${srcNote})`,
+          reason:wasSwap?'Value(s) were in wrong column — corrected'
+                        :(sellerUsed?'MID filled using itemSellerName (same entity as manufacturer name)':'Blank cell(s) filled from database')});
       }
 
       showAutofillSummary(file.name,filled,swapped,unfilled,conflictRows,unchanged,details,wb,sheetName);
