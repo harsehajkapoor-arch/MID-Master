@@ -465,34 +465,24 @@ function patchCell(sheet,colIdx,rowIdx,value){
   }
 }
 
-// ── DB lookup helpers ──
-// These are the ONLY functions allowed to classify a cell value.
-// Pattern matching is NEVER used — only exact DB lookups.
-function dbLookupByMID(mid){
-  if(!mid)return null;
-  const mU=mid.trim().toUpperCase();
-  const entry=Object.entries(db).find(([n,v])=>v.mid.toUpperCase()===mU);
+// ── DB lookup helpers — the ONLY way values are identified, no pattern matching ever ──
+
+// Look up a value as a MID in the DB. Returns {name, mid, source} or null.
+function dbLookupByMID(val){
+  if(!val||!val.trim())return null;
+  const v=val.trim().toUpperCase();
+  const entry=Object.entries(db).find(([,rec])=>rec.mid.toUpperCase()===v);
   return entry?{name:entry[0],mid:entry[1].mid,source:entry[1].source}:null;
 }
-function dbLookupByName(name){
-  if(!name)return null;
-  const nT=name.trim();
-  // Exact match first
-  if(db[nT])return{name:nT,mid:db[nT].mid,source:db[nT].source};
-  // Case-insensitive exact match only — no fuzzy, no partial
-  const ciKey=Object.keys(db).find(k=>k.toLowerCase()===nT.toLowerCase());
-  return ciKey?{name:ciKey,mid:db[ciKey].mid,source:db[ciKey].source}:null;
-}
-// Returns: 'mid' | 'name' | 'both' | 'unknown'
-// 'both' means the value appears as BOTH a MID and a Name in the DB (extremely rare — treat as unknown)
-function classifyValue(val){
-  if(!val||val.trim()==='')return'empty';
-  const asMID=dbLookupByMID(val);
-  const asName=dbLookupByName(val);
-  if(asMID&&asName)return'both';   // ambiguous — do not touch
-  if(asMID)return'mid';
-  if(asName)return'name';
-  return'unknown';                  // not in DB at all — do not touch
+
+// Look up a value as a manufacturer Name in the DB. Returns {name, mid, source} or null.
+// Only exact match or case-insensitive exact match — never partial/fuzzy.
+function dbLookupByName(val){
+  if(!val||!val.trim())return null;
+  const v=val.trim();
+  if(db[v])return{name:v,mid:db[v].mid,source:db[v].source};
+  const key=Object.keys(db).find(k=>k.toLowerCase()===v.toLowerCase());
+  return key?{name:key,mid:db[key].mid,source:db[key].source}:null;
 }
 
 function handleAutofill(file){
@@ -514,15 +504,13 @@ function handleAutofill(file){
         return;
       }
 
-      // Detect instruction rows (rows 2-4 often contain "Mandatory", "Min:", etc.)
+      // Skip instruction rows (rows like "Mandatory", "Min: 1 / Max: 70", etc.)
       let dataStartIdx=1;
       for(let i=1;i<=4&&i<rows.length;i++){
         const r=rows[i];
-        const midVal=midCol>=0?String(r[midCol]||'').trim():'';
-        const nameVal=nameCol>=0?String(r[nameCol]||'').trim():'';
-        if(/mandatory|conditional|min:|max:|alphanumeric|if mid/i.test(midVal+' '+nameVal)){
-          dataStartIdx=i+1;
-        }
+        const a=String(r[midCol]||'').trim();
+        const b=String(r[nameCol]||'').trim();
+        if(/mandatory|conditional|min:|max:|alphanumeric|if mid/i.test(a+' '+b)) dataStartIdx=i+1;
       }
 
       let filled=0,swapped=0,unfilled=0,conflictRows=0,unchanged=0,details=[];
@@ -532,201 +520,92 @@ function handleAutofill(file){
         const excelRow=i+1;
         if(!row||row.every(c=>c===''||c===null||c===undefined))continue;
 
-        const rawMID=midCol>=0?String(row[midCol]||'').trim():'';
-        const rawName=nameCol>=0?String(row[nameCol]||'').trim():'';
+        // Read raw cell values, treat junk strings as empty
+        const junk=v=>(!v||v==='nan'||v==='undefined'||v==='null');
+        const rawA=midCol>=0?String(row[midCol]||'').trim():'';
+        const rawB=nameCol>=0?String(row[nameCol]||'').trim():'';
+        const cellMID=junk(rawA)?'':rawA;   // what's currently in the MID column
+        const cellName=junk(rawB)?'':rawB;  // what's currently in the Name column
 
-        // Treat "nan", "undefined", "null" as empty
-        const midVal=(rawMID===''||rawMID==='nan'||rawMID==='undefined'||rawMID==='null')?'':rawMID;
-        const nameVal=(rawName===''||rawName==='nan'||rawName==='undefined'||rawName==='null')?'':rawName;
+        // ── STEP 1: Ask the DB what each cell value actually is ──
+        // Each value gets checked against BOTH the MID index and the Name index.
+        // The DB answer is the ground truth — no pattern matching, no guessing.
+        const midCellAsMID  = cellMID  ? dbLookupByMID(cellMID)   : null; // is MID-col value a known MID?
+        const midCellAsName = cellMID  ? dbLookupByName(cellMID)  : null; // is MID-col value a known Name?
+        const nameCellAsMID = cellName ? dbLookupByMID(cellName)  : null; // is Name-col value a known MID?
+        const nameCellAsName= cellName ? dbLookupByName(cellName) : null; // is Name-col value a known Name?
 
-        const midEmpty=midVal==='';
-        const nameEmpty=nameVal==='';
+        // ── STEP 2: Decide what the correct MID and Name are for this row ──
+        let correctMID='', correctName='', source='', action='', needsChange=false;
 
-        // ── CASE A: Both cells have a value ──
-        if(!midEmpty&&!nameEmpty){
-          // Classify each via DB only
-          const midCellClass=classifyValue(midVal);
-          const nameCellClass=classifyValue(nameVal);
+        // Collect what we know from each cell
+        if(midCellAsMID)  { correctMID=midCellAsMID.mid;   correctName=correctName||midCellAsMID.name;  source=midCellAsMID.source; }
+        if(midCellAsName) { correctName=midCellAsName.name; correctMID=correctMID||midCellAsName.mid;    source=midCellAsName.source; }
+        if(nameCellAsMID) { correctMID=nameCellAsMID.mid;  correctName=correctName||nameCellAsMID.name; source=nameCellAsMID.source; }
+        if(nameCellAsName){ correctName=nameCellAsName.name;correctMID=correctMID||nameCellAsName.mid;   source=nameCellAsName.source; }
 
-          // Both correct (MID col = known MID, Name col = known Name, or unknown values we leave alone)
-          if((midCellClass==='mid'||midCellClass==='unknown')&&(nameCellClass==='name'||nameCellClass==='unknown')){
-            unchanged++;
-            continue;
+        // If DB gave us nothing for either cell — nothing is recognisable, skip
+        if(!correctMID&&!correctName){
+          if(!cellMID&&!cellName){
+            unfilled++;
+            details.push({row:excelRow,type:'unfilled',name:'',mid:'',
+              action:'NOT filled',reason:'Both cells are blank — need at least one value to look up'});
+          }else{
+            unfilled++;
+            details.push({row:excelRow,type:'unfilled',
+              name:cellName||'',mid:cellMID||'',
+              action:'NOT filled',
+              reason:`"${cellMID||cellName}" not found in database — upload more manifests or fill manually`});
           }
+          continue;
+        }
 
-          // Classic swap: MID col contains a known Name, Name col contains a known MID
-          if(midCellClass==='name'&&nameCellClass==='mid'){
-            patchCell(sheet,midCol,excelRow,nameVal);   // put the MID in MID col
-            patchCell(sheet,nameCol,excelRow,midVal);   // put the Name in Name col
-            swapped++;
-            details.push({row:excelRow,type:'swapped',
-              name:midVal,mid:nameVal,
-              action:`Swapped: MID col had "${midVal}" (a name), Name col had "${nameVal}" (a MID) — corrected`,
-              reason:'Both columns had values swapped — confirmed via database lookup'});
-            continue;
-          }
+        // Check for MID conflict
+        if(correctName&&conflicts[correctName]){
+          conflictRows++;
+          details.push({row:excelRow,type:'conflict',name:correctName,mid:correctMID,
+            action:'NOT touched',
+            reason:`"${correctName}" has a MID conflict in the database: ${Object.keys(conflicts[correctName]).join(' vs ')} — verify manually`});
+          continue;
+        }
 
-          // MID col has a known Name, Name col also has a known Name (name duplicated, MID missing)
-          if(midCellClass==='name'&&nameCellClass==='name'){
-            // The MID col value is a name — look up its MID
-            const isConflict=!!conflicts[midVal];
-            if(isConflict){
-              conflictRows++;
-              details.push({row:excelRow,type:'conflict',name:midVal,mid:'',action:'NOT touched',
-                reason:`MID column contains name "${midVal}" but it has a MID conflict — verify manually`});
-              continue;
-            }
-            const found=dbLookupByName(midVal);
-            if(found){
-              patchCell(sheet,midCol,excelRow,found.mid);
-              swapped++;
-              details.push({row:excelRow,type:'swapped',name:midVal,mid:found.mid,
-                action:`MID col had name "${midVal}" → replaced with correct MID "${found.mid}"`,
-                reason:'MID column contained a manufacturer name — filled correct MID from database'});
-            }else{
-              unfilled++;
-              details.push({row:excelRow,type:'unfilled',name:midVal,mid:'',action:'NOT touched',
-                reason:`MID column contains "${midVal}" which looks like a name but has no MID in database`});
-            }
-            continue;
-          }
+        // ── STEP 3: Write the correct values into their correct columns (only if changed) ──
+        const midChanged  = correctMID  && correctMID!==cellMID;
+        const nameChanged = correctName && correctName!==cellName;
 
-          // Name col has a known MID, MID col also has a known MID (MID duplicated, name missing)
-          if(nameCellClass==='mid'&&midCellClass==='mid'){
-            const found=dbLookupByMID(nameVal);
-            if(found){
-              patchCell(sheet,nameCol,excelRow,found.name);
-              swapped++;
-              details.push({row:excelRow,type:'swapped',name:found.name,mid:midVal,
-                action:`Name col had MID "${nameVal}" → replaced with correct name "${found.name}"`,
-                reason:'Name column contained a MID — filled correct name from database'});
-            }else{
-              unfilled++;
-              details.push({row:excelRow,type:'unfilled',name:'',mid:midVal,action:'NOT touched',
-                reason:`Name column contains "${nameVal}" which looks like a MID but has no name in database`});
-            }
-            continue;
-          }
-
-          // Ambiguous or unknown — do NOT touch
+        if(!midChanged&&!nameChanged){
           unchanged++;
           continue;
         }
 
-        // ── CASE B: MID blank, Name col has a value ──
-        if(midEmpty&&!nameEmpty){
-          const nameClass=classifyValue(nameVal);
-
-          if(nameClass==='mid'){
-            // A known MID is sitting in the Name column — move it, then fill name
-            const found=dbLookupByMID(nameVal);
-            patchCell(sheet,midCol,excelRow,nameVal);
-            if(found){
-              patchCell(sheet,nameCol,excelRow,found.name);
-              swapped++;
-              details.push({row:excelRow,type:'swapped',name:found.name,mid:nameVal,
-                action:`Name col had MID "${nameVal}" → moved to MID col, Name filled as "${found.name}"`,
-                reason:'MID was in Name column — moved and name filled from database'});
-            }else{
-              patchCell(sheet,nameCol,excelRow,'');
-              swapped++;
-              details.push({row:excelRow,type:'swapped',name:'',mid:nameVal,
-                action:`Name col had MID "${nameVal}" → moved to MID col. Name not in database`,
-                reason:'MID was in Name column — moved to correct column. Name unknown, left blank'});
-            }
-            continue;
-          }
-
-          if(nameClass==='name'){
-            // Correct: name is in name col, MID is just missing — fill it
-            const isConflict=!!conflicts[nameVal];
-            if(isConflict){
-              conflictRows++;
-              details.push({row:excelRow,type:'conflict',name:nameVal,mid:'',action:'NOT filled',
-                reason:`MID conflict for "${nameVal}": ${Object.keys(conflicts[nameVal]).join(' vs ')} — verify manually`});
-              continue;
-            }
-            const found=dbLookupByName(nameVal);
-            if(found){
-              patchCell(sheet,midCol,excelRow,found.mid);
-              filled++;
-              details.push({row:excelRow,type:'filled',name:nameVal,mid:found.mid,
-                action:`Filled MID "${found.mid}" from ${found.source}`,
-                reason:'Exact name match in database'});
-            }else{
-              unfilled++;
-              details.push({row:excelRow,type:'unfilled',name:nameVal,mid:'',action:'NOT filled',
-                reason:`"${nameVal}" not found in database — upload more manifests or fill manually`});
-            }
-            continue;
-          }
-
-          // nameClass === 'unknown' — value is not in DB at all, do not touch
-          unfilled++;
-          details.push({row:excelRow,type:'unfilled',name:nameVal,mid:'',action:'NOT filled',
-            reason:`"${nameVal}" not found in database — cannot confirm this is a valid name`});
-          continue;
+        // Build description of what's changing
+        const changes=[];
+        if(midChanged){
+          patchCell(sheet,midCol,excelRow,correctMID);
+          if(cellMID&&cellMID!==correctMID)
+            changes.push(`MID col: "${cellMID}" → "${correctMID}"`);
+          else
+            changes.push(`MID col: filled "${correctMID}"`);
+        }
+        if(nameChanged){
+          patchCell(sheet,nameCol,excelRow,correctName);
+          if(cellName&&cellName!==correctName)
+            changes.push(`Name col: "${cellName}" → "${correctName}"`);
+          else
+            changes.push(`Name col: filled "${correctName}"`);
         }
 
-        // ── CASE C: Name blank, MID col has a value ──
-        if(!midEmpty&&nameEmpty){
-          const midClass=classifyValue(midVal);
+        // Was this a swap (value in wrong column) or just a fill (blank cell)?
+        const wasSwap=(cellMID&&midCellAsName)||(cellName&&nameCellAsMID)||
+                      (cellMID&&!midCellAsMID&&midCellAsName)||(cellName&&!nameCellAsName&&nameCellAsMID);
 
-          if(midClass==='name'){
-            // A known Name is sitting in the MID column — move it, then fill MID
-            const isConflict=!!conflicts[midVal];
-            if(isConflict){
-              conflictRows++;
-              details.push({row:excelRow,type:'conflict',name:midVal,mid:'',action:'NOT touched',
-                reason:`MID column contains name "${midVal}" but it has a conflict — verify manually`});
-              continue;
-            }
-            const found=dbLookupByName(midVal);
-            patchCell(sheet,nameCol,excelRow,midVal);
-            if(found){
-              patchCell(sheet,midCol,excelRow,found.mid);
-              swapped++;
-              details.push({row:excelRow,type:'swapped',name:midVal,mid:found.mid,
-                action:`MID col had name "${midVal}" → moved to Name col, MID filled as "${found.mid}"`,
-                reason:'Name was in MID column — moved and MID filled from database'});
-            }else{
-              patchCell(sheet,midCol,excelRow,'');
-              swapped++;
-              details.push({row:excelRow,type:'swapped',name:midVal,mid:'',
-                action:`MID col had name "${midVal}" → moved to Name col. MID not in database`,
-                reason:'Name was in MID column — moved to correct column. MID unknown, left blank'});
-            }
-            continue;
-          }
+        if(wasSwap){ swapped++; }else{ filled++; }
 
-          if(midClass==='mid'){
-            // Correct: MID in MID col, just name missing — fill it
-            const found=dbLookupByMID(midVal);
-            if(found){
-              patchCell(sheet,nameCol,excelRow,found.name);
-              filled++;
-              details.push({row:excelRow,type:'filled',name:found.name,mid:midVal,
-                action:`Filled Name "${found.name}" from ${found.source}`,
-                reason:'Exact MID match in database'});
-            }else{
-              unfilled++;
-              details.push({row:excelRow,type:'unfilled',name:'',mid:midVal,action:'NOT filled',
-                reason:`MID "${midVal}" not found in database`});
-            }
-            continue;
-          }
-
-          // midClass === 'unknown' — not in DB, do not touch
-          unfilled++;
-          details.push({row:excelRow,type:'unfilled',name:'',mid:midVal,action:'NOT filled',
-            reason:`"${midVal}" not found in database — cannot confirm this is a valid MID`});
-          continue;
-        }
-
-        // ── CASE D: Both blank ──
-        unfilled++;
-        details.push({row:excelRow,type:'unfilled',name:'',mid:'',action:'NOT filled',
-          reason:'Both MID and Name are blank — need at least one to resolve'});
+        details.push({row:excelRow,
+          type:wasSwap?'swapped':'filled',
+          name:correctName,mid:correctMID,
+          action:changes.join(' | ')+` (source: ${source})`,
+          reason:wasSwap?'Value(s) were in wrong column — corrected using database':'Blank cell(s) filled using database'});
       }
 
       showAutofillSummary(file.name,filled,swapped,unfilled,conflictRows,unchanged,details,wb,sheetName);
